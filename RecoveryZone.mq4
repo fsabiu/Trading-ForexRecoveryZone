@@ -12,24 +12,40 @@
 //|                                                                  |
 //+------------------------------------------------------------------+
 
-struct trade
-  {
+class trade {
+ public:
    string  currency;        // currency of the trade
    string  trade_type;      // BUY, SELL
    short   trade_entry;     // Price
    double  trade_tp;        // Price
    double  trade_sl;        // Price
    int MagicNumber;         // Magic Number
-   int n_order;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)           
+   int n_order;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)
+   //--- Default constructor
+   trade(void);
+   //--- Parametric constructor
+   trade(string cur, string  t_type, short   t_entry, double  t_tp, double  t_sl, int MNum, int n_ord);      
   };
+//+------------------------------------------------------------------+
+//| Parametric constructor                                           |
+//+------------------------------------------------------------------+
+trade::trade(string cur, string t_type, short t_entry, double t_tp, double t_sl, int MNum, int n_ord) {
+   string  currency = cur;        // currency of the trade
+   string  trade_type = t_type;      // BUY, SELL
+   short   trade_entry = t_entry;     // Price
+   double  trade_tp = t_tp;        // Price
+   double  trade_sl = t_sl;        // Price
+   int MagicNumber = MNum;         // Magic Number
+   int n_order = n_ord;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)
+}
  
 extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
 extern double first_trade_size = 0.1
 extern double size_multipler = 1; // 1 is strongly recommended to reduce losses
 extern int slippage = 2;
 extern int max_trade_orders = 8;
-extern int tp_pips = 2;
-extern int reco_pips = 2;
+extern int tp_pips = 60;
+extern int reco_pips = 20;
 extern string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 extern double trades_sizes[10] = {0.1, 0.14, 0.1, 0.14, 0.19, 0.25, 0.33, 0.44, 0.59, 0.78};
 
@@ -88,7 +104,7 @@ void OnTick()
       // Enough margin to open a trade?
       free_trades = getFreeTrades();
       
-      if(free_trades>0) { //How many 1st operations can I open?
+      if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown
          // Look for 1st operation
          market, op_type, tp, sl, magic_nr = marketScan()
       }
@@ -120,7 +136,59 @@ void OnTick()
         }
 
 
-
+trade marketScan() {
+   string market = "EURUSD";
+   
+   
+   string type = OP_BUY;
+   int magic_number = getFreeMagicNumber();
+   
+   // open at sell
+   double price;
+   double tp;
+   double sl;
+   
+   //OrderSend(Symbol(),OP_BUY,0.1,Ask,2,Bid-15*Point,Bid+15*Point);
+   OrderSend("EURUSD", OP_BUY, trades_sizes[0], Ask, 2, Bid-(tp_pips+reco_pips)*Point, Bid+tp_pips*Point);
+   
+   // Error checking
+   int Error=GetLastError();                 // Failed :(
+   switch(Error)                             // Overcomable errors
+     {
+      case 129:Alert("Invalid price. Retrying..");
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+      case 135:Alert("The price has changed. Retrying..");
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+      case 146:Alert("Trading subsystem is busy. Retrying..");
+         Sleep(500);                         // Simple solution
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+     }
+   switch(Error)                             // Critical errors
+     {
+      case 2 : Alert("Common error.");
+         break;                              // Exit 'switch'
+      case 5 : Alert("Outdated version of the client terminal.");
+         break;                              // Exit 'switch'
+      case 64: Alert("The account is blocked.");
+         break;                              // Exit 'switch'
+      case 133:Alert("Trading fobidden");
+         break;                              // Exit 'switch'
+      default: Alert("Occurred error ",Error);// Other alternatives   
+     }
+   break;                                    // Exit cycle
+   }
+   
+   // Fetch order and fill trades structure
+      // set tp
+      // set sl;
+      
+      // set next trade
+      // add struct to trades
+   
+}
 
 void checkOrders() {
    // Close pending orders if TP or SL have been hit
@@ -157,214 +225,31 @@ double getRequiredSize() {
    return required_size;
 }
 
-// Returns the maximum number of position that can be open with the current equities and open position (which are considered to evolve according to the worst scenario)
-string getFreeTrades(){
+// Returns the maximum number of position that can be open with the current equitiy and opened position (which are considered to evolve according to the worst scenario)
+// i.e. how many position will keep the margin level above 100 with max_trade_orders per trade
+int getFreeTrades(){
    
    int free_trades = 0
    
    // Worst case for the currently opened trades
    current_trades = trade_size_required*ArraySize(trades);
    
-   potential_busy_margin = trade_size_required*eurperlot*current_trades;
+   // TODO consider trades with trail stop or SL at breakeven
+   size_required = trade_size_required*eurperlot; // size required by a trade with current size
+   potential_busy_margin = size_required*current_trades;
    
    // Margin level = (Equity/Used Margin) X 100
-   
-   // TODO
+   // Margin level if another position is opened (+size_required)
+   potential_margin_level = 101;
+   trades = 1;
+   while(potential_margin_level > 100) {
+      potential_margin_level = (AccountEquity()/(potential_busy_margin + i*size_required))*100;
+      
+      if(potential_margin_level > 100) {
+         i++;
+         free_trades++;
+      }
+   }
    
    return free_trades;
 }
-
-
-
-//////////////////////////////
-
-char Sig_f()
-  {
-   CountOpenedPositions_f();
-
-   if(Orders_Total==0) // First order
-     {
-      double rsi=iRSI(Symbol(),0,RSI_period,PRICE_CLOSE,0);
-      if(rsi>=RSI_sell_zone) return(-1); // sell
-      if(rsi<=RSI_buy_zone) return(1);   // buy
-     }
-   else // Next orders
-     {
-
-      // If we've reached the max nr of orders, do nothing 
-      if(Max_orders>0 && Orders_Total>=Max_orders) return(0);
-
-      // Else, fetch the last order 
-      // (OrderSelect() function copies order data into program environment and all further calls: https://docs.mql4.com/trading/orderselect)
-
-      Select_last_order_f();
-      
-      // if last order is BUY
-      if(OrderType()==OP_BUY)
-        {
-
-         // calculate new distance
-         double dist=start_distance*point*MathPow(distance_multiplier,Orders_Total-1);
-
-         // check if distance > max allowed distance
-         if(max_distance>0 && dist>max_distance*point) dist=max_distance*point;
-         if(min_distance>0 && dist<min_distance*point) dist=min_distance*point;
-
-         // if BUY price <= last order price - dist, return -1 = SELL
-         if(Bid<=OrderOpenPrice()-dist) return(-1);
-        }
-
-      // if last order is SELL
-      if(OrderType()==OP_SELL)
-        {
-
-         // calculate new distance
-         double dist=start_distance*point*MathPow(distance_multiplier,Orders_Total-1);
-
-         // check if distance > max allowed distance
-         if(max_distance>0 && dist>max_distance*point) dist=max_distance*point;
-         if(min_distance>0 && dist<min_distance*point) dist=min_distance*point;
-
-         // if SELL price >= last order price + dist, return 1 = BUY
-         if(Ask>=OrderOpenPrice()+dist) return(1);
-        }
-     }//end else
-
-
-   return(0);
-  }
-///////////////////////////////////////////////////////////////////////////////////////////////
-
-void open_f()
-  {
-///////////// LOT /////////////////
-   double Lotss=Lot;
-   CountOpenedPositions_f();
-   Lotss=Lot*MathPow(Lot_multiplier,Orders_Total);
-//user limit
-   if(max_lot>0 && Lotss>max_lot) Lotss=max_lot;
-   if(min_lot>0 && Lotss<min_lot) Lotss=min_lot;
-//broker limit
-   double Min_Lot =MarketInfo(Symbol(),MODE_MINLOT);
-   double Max_Lot =MarketInfo(Symbol(),MODE_MAXLOT);
-   if(Lotss<Min_Lot) Lotss=Min_Lot;
-   if(Lotss>Max_Lot) Lotss=Max_Lot;
-
-//chek free margin
-   if(MarketInfo(Symbol(),MODE_MARGINREQUIRED)*Lotss>AccountFreeMargin()) {Alert("Not enouth money to open order "+string(Lotss)+" lots!");return;}
-
-
-
-///////////// MAIN /////////////  
-   int ticket_op=-1;
-   for(int j_op = 0; j_op < 64; j_op++)
-     {
-      while(IsTradeContextBusy()) Sleep(200);
-      RefreshRates();
-
-      if(Sig_p>0) ticket_op=OrderSend(Symbol(),OP_BUY,NormalizeDouble(Lotss,nor_lot),Ask,Slippage,0,0,comment,Magic,0,clrNONE);
-      if(Sig_p<0) ticket_op=OrderSend(Symbol(),OP_SELL,NormalizeDouble(Lotss,nor_lot),Bid,Slippage,0,0,comment,Magic,0,clrNONE);
-
-      if(ticket_op>-1)break;
-     }
-
-
-  }
-////////////////////////////////////////////////////////////////////////////////////
-void CountOpenedPositions_f()
-  {
-   buys=0;
-   sells=0;
-   Orders_Total=0;
-
-   for(int i=OrdersTotal()-1; i>=0; i--)
-     {
-      if(OrderSelect(i,SELECT_BY_POS))
-        {
-         if(OrderMagicNumber()==Magic) // only counts positions opened by the EA
-           {
-            if(OrderSymbol()==Symbol()) // only counts positions for the current current chart symbol
-              {
-               if(OrderType()==OP_BUY)      buys++;
-               if(OrderType()==OP_SELL)     sells++;
-              }
-           }
-        }
-     }
-
-   Orders_Total=buys+sells;
-  }
-////////////////////////////////////////////////////////////////////
-void Select_last_order_f()
-  {
-   for(int i=OrdersTotal()-1; i>=0; i--)
-     {
-      if(OrderSelect(i,SELECT_BY_POS))
-        {
-         if(OrderMagicNumber()==Magic)
-           {
-            if(OrderSymbol()==Symbol())
-              {
-               break;
-              }
-           }
-        }
-     }
-
-  }
-/////////////////////////////////////////////////////////////////////////////////// 
-double Profit_f()
-  {
-   double prof=0;
-
-   for(int i=OrdersTotal()-1; i>=0; i--)
-     {
-      if(OrderSelect(i,SELECT_BY_POS))
-        {
-         if(OrderMagicNumber()==Magic)
-           {
-            if(OrderSymbol()==Symbol())
-              {
-               prof+=OrderProfit()+OrderSwap()+OrderCommission();
-              }
-           }
-        }
-     }
-
-   return(prof);
-  }
-////////////////////////////////////////////////////////////////////////////////
-void Close_all_f()
-  {
-   for(int i=OrdersTotal()-1; i>=0; i--)
-     {
-      if(OrderSelect(i,SELECT_BY_POS))
-        {
-         if(OrderMagicNumber()==Magic)
-           {
-            if(OrderSymbol()==Symbol())
-              {
-               bool ticket_ex=false;
-               for(int j_ex=0;j_ex<64; j_ex++)
-                 {
-                  while(IsTradeContextBusy()) Sleep(200);
-                  RefreshRates();
-
-                  if(OrderType()==OP_BUY) ticket_ex=OrderClose(OrderTicket(),OrderLots(),Bid,Slippage,clrYellow);
-                  else
-                     if(OrderType()==OP_SELL) ticket_ex=OrderClose(OrderTicket(),OrderLots(),Ask,Slippage,clrYellow);
-                  else
-                     if(OrderType()==OP_SELLSTOP || OrderType()==OP_BUYSTOP || OrderType()==OP_SELLLIMIT || OrderType()==OP_BUYLIMIT) ticket_ex=OrderDelete(OrderTicket(),clrBrown);
-                  else
-                     break;
-                  if(ticket_ex==true)break;
-                 }
-              }
-           }
-        }
-     }
-
-  } 
-//+------------------------------------------------------------------+
-
-
