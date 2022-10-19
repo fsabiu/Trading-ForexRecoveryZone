@@ -12,37 +12,8 @@
 //|                                                                  |
 //+------------------------------------------------------------------+
 
-/*
-class trade {
- public:
-   string  currency;        // currency of the trade
-   string  trade_type;      // BUY, SELL
-   short   trade_entry;     // Price
-   double  trade_tp;        // Price
-   double  trade_sl;        // Price
-   int MagicNumber;         // Magic Number
-   int n_order;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)
-   //--- Default constructor
-   trade(void);
-   //--- Parametric constructor
-   trade(string cur, string  t_type, short   t_entry, double  t_tp, double  t_sl, int MNum, int n_ord);      
-  };
-//+------------------------------------------------------------------+
-//| Parametric constructor                                           |
-//+------------------------------------------------------------------+
-
-trade::trade(string cur, string t_type, short t_entry, double t_tp, double t_sl, int MNum, int n_ord) {
-   string  currency = cur;        // currency of the trade
-   string  trade_type = t_type;      // BUY, SELL
-   short   trade_entry = t_entry;     // Price
-   double  trade_tp = t_tp;        // Price
-   double  trade_sl = t_sl;        // Price
-   int MagicNumber = MNum;         // Magic Number
-   int n_order = n_ord;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)
-}
-*/
 extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
-extern double first_trade_size = 0.1
+extern double first_trade_size = 0.1;
 extern double size_multipler = 1; // 1 is strongly recommended to reduce losses
 extern int slippage = 2;
 extern int max_trade_orders = 8;
@@ -51,30 +22,18 @@ extern int reco_pips = 20;
 extern string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 extern double trades_sizes[10] = {0.1, 0.14, 0.1, 0.14, 0.19, 0.25, 0.33, 0.44, 0.59, 0.78};
 
-
 // To be instantiated in OnInit()
 double account_free_margin = -1;
 double account_equity = -1;
 double trade_size_required = -1; // Dictionary needed for multicurrency
 double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency and/or different leverage
 
-
 // To be updated at each new position opening
 int free_trades; // How many trades can I start with the current margin?
 int magic_numbers[];
 int magic_numbers_size = 0;
-//trade trades[]; // array of arrays of trades
- /*
-e.g. 
-         trades[0] = [{"EURUSD", "BUY", 0.99880, 0.99990, 0.99780, 001, 1}, 
-                      {"EURUSD", "SELL", 0.99880, 0.99990, 0.99780, 001, 2}, 
-                      ...
-                     ]
-         trades[1] = {"EURCHF", "BUY", 0.99880, 0.99990, 0.99780, 002, 1}
-*/
-
   
-//////////////////////////////////////////////////////////////
+
 int OnInit()
   {
 
@@ -96,20 +55,24 @@ int OnInit()
    // Calculate size needed for a trade (worst scenario: max_trade_orders)
    trade_size_required = getRequiredSize();
    
-   // Allocate magic_numbers array
-   if(ArrayResize(magic_numbers, (account_equity/trade_size_required)*2 < 0) {
-      return(INIT_FAILED);
-   }
-   
-   // Initializing magic_numbers array to -1
-   magic_numbers_size = ArraySize(magic_numbers);
-   for(int i=0; i<magic_numbers_size; i++){
-      magic_numbers[i] = -1;
-   }
+   // Allocate magic_numbers array and initializing elements to -1 
+   initMagicNumbers((account_equity/trade_size_required)*2, 0);
    
    return(INIT_SUCCEEDED);
 }
-////////////////////////////////////
+
+void initMagicNumbers(int new_size, int old_size) {
+   magic_numbers_size = size;
+   
+   if(ArrayResize(magic_numbers, magic_numbers_size)< 0) {
+      return(INIT_FAILED);
+   }
+   
+   for(int i = old_size; i < magic_numbers_size; i++){
+      magic_numbers[i] = -1;
+   }
+}
+
 
 void OnTick()
   {
@@ -120,9 +83,9 @@ void OnTick()
       // Enough margin to open a trade?
       free_trades = getFreeTrades();
       
-      if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown
+      if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown allowed
          // Look for 1st operation
-         int scan = marketScan()
+         int scan = marketScan();
          
          if(scan!=0) {
             Print("Error", scan);
@@ -134,7 +97,6 @@ void OnTick()
 
 int marketScan() {
    string market = "EURUSD";
-   
    
    int type = OP_BUY;
    int magic_number = getFreeMagicNumber();
@@ -179,61 +141,35 @@ int marketScan() {
      }
    break;                                    // Exit cycle
    }
-    
+   
+   return 0;
 }
 
 void checkOrders() {
-   /*
-   Three scenarios for each trade (i.e. MagicNumber):
    
-   How many orders do I have with its MagicNumber?
+   int opened_orders;
+   int pending_orders;
+   int total_trades;
    
-   - Zero trades:    // TP and/or SL have been hit.
-            Remove MagicNumber
-            
-   - 1 trade.
+   datetime first_order_time;
+   int first_order_type;
+   double first_order_price;
+   string first order_symbol;
    
-         - Pending:
-            Is it the 1st?
-               - Yes: do nothing
-               - No: delete it, TP has been hit
-            
-         - Open:
-            1. Did I set the next order (<= max_trade_orders)?
-               - Yes: do nothing
-               - No: do it
-            2. Trail stop here   
-   
-         - Closed:
-            Take profit hit. // It would mean that price moved of tp_pips in less than one candle!
-
-   - 2 to max_trade_orders - 1
+   for(int magic=0; i<magic_numbers_size; magic++) {
          
-         How many are pending?
+      if(magic_numbers[magic]!= -1){
          
-            - Zero: set opposite operation with same MagicNumber
-            
-            - One: do nothing
-            
-            - More: error
-   
-   - max_trade_orders
-   
-         Do nothing
-         
-   */
-   
-   for(int i=0; i<magic_numbers_size; i++) {
-      
-      int opened_orders;
-      int pending_orders;
-      int total_trades;
-         
-      if(magic_numbers[i]!= -1){
-            
+         // Orders with current magic number
          opened_orders = 0;
          pending_orders = 0;
          total_orders = 0;
+         
+         // First order info
+         first_order_time = TimeCurrent();
+         first_order_type = -1;
+         first_order_price = -1;
+         first_order_symbol = null;
          
          // Counting opened and pending orders for this magic_number
          for (int i = 0; i < OrdersTotal(); i++) {
@@ -241,12 +177,18 @@ void checkOrders() {
                Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             } 
-            // If the Magic Number of the order matches the Magic Number entered at the beginning.
-            if(OrderMagicNumber()==magic_numbers[i]){
-               if(OrderType() != OP_BUY && OrderType() != OP_SELL) {
+            
+            if(OrderMagicNumber() == magic_numbers[magic]){
+               if(OrderType() != OP_BUY && OrderType() != OP_SELL) { // if order is not opened yet
                   pending_orders++;
                } else {
                   opened_orders++;
+                  if(OrderOpenTime < first_order_time) { // Saving info of 1st order
+                     first_order_type = OrderType();
+                     first_order_time = OrderOpenTime();
+                     first_order_price = OrderOpenPrice();
+                     first_order_symbol = OrderSymbol();
+                  }
                }
             }
          }
@@ -256,23 +198,135 @@ void checkOrders() {
          switch(total_orders)
             {
             case 0:
+               // Remove Magic Number, TP or SL hit
+               removeMagicNumber(magic);
+               break;
             
-            
-            case 1:
-            
-            
-            default:
-               if(<max_trade_orders) { // between 2 and max_trade_orders-1 orders 
-               
-               
-               
+            case default: // total_orders > 1
+               // Checks
+               if(pending_orders > 1){
+                  Alert("Too many pending orders!"); // We should not have more pending orders for a magic number
+                  break;
                }
-         
+               
+               // is there a pending order?
+               if(pending_orders == 1){
+                  Print("Wait...");
+               }
+               
+               if(pending_orders == 0 && opened_orders < max_trade_orders) {
+                  int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
+               }
+               break;
+            }   
+   }
+}
+
+
+int sendNextOrder(string symbol, int first_order_type, double first_order_price, int opened_orders, int magic_number) {
+
+   double new_order_size = trades_sizes[opened_orders];
+   int new_order_type = -1;
+   double new_order_price;
+   double new_order_tp;
+   double new_order_sl;
+   
+   switch(first_order_type)
+      {
+      case OP_BUY:
+            if(opened_orders % 2 == 0) { // Buy
+               new_order_type = OP_BUYSTOP;
+               new_order_price = first_order_price;
+               new_order_tp = first_order_price + tp_pips*Point;
+               new_order_sl = first_order_price - (tp_pips + reco_pips)*Point;
+               break;
+            }else { // Sell
+               new_order_type = OP_SELLSTOP;
+               new_order_price = first_order_price - reco_pips*Point;
+               new_order_tp = first_order_price - (tp_pips + reco_pips)*Point;
+               new_order_sl = first_order_price + tp_pips*Point;
+               break;
             }
       
-      
+      case OP_SELL:
+            if(opened_orders % 2 == 0) { // Sell
+               new_order_type = OP_SELLSTOP;
+               new_order_price = first_order_price;
+               new_order_tp = first_order_price - tp_pips*Point;
+               new_order_sl = first_order_price + (tp_pips + reco_pips)*Point;
+               break;
+            }else{
+               new_order_type = OP_BUYSTOP;
+               new_order_price = first_order_price - reco_pips*Point;
+               new_order_tp = first_order_price + (tp_pips + reco_pips)*Point;
+               new_order_sl = first_order_price - tp_pips*Point;
+               break;
+            }
       }
+   
+   // Send Order
+   OrderSend(symbol = symbol, 
+             cmd = new_order_type,
+             volume = new_order_size, 
+             price = new_order_price, 
+             slippage = slippage, 
+             stoploss = new_order_sl, 
+             takeprofit = new_order_tp,
+             comment = IntegerToString(opened_orders+1), //Cardinality of the order
+             magic = magic_number);
+    }
+    
+    // Error checking
+   int Error=GetLastError();                 // Failed :(
+   switch(Error)                             // Overcomable errors
+     {
+      case 129:Alert("Invalid price. Retrying..");
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+      case 135:Alert("The price has changed. Retrying..");
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+      case 146:Alert("Trading subsystem is busy. Retrying..");
+         Sleep(500);                         // Simple solution
+         RefreshRates();                     // Update data
+         continue;                           // At the next iteration
+     }
+   switch(Error)                             // Critical errors
+     {
+      case 2 : Alert("Common error.");
+         break;                              // Exit 'switch'
+      case 5 : Alert("Outdated version of the client terminal.");
+         break;                              // Exit 'switch'
+      case 64: Alert("The account is blocked.");
+         break;                              // Exit 'switch'
+      case 133:Alert("Trading fobidden");
+         break;                              // Exit 'switch'
+      default: Alert("Occurred error ",Error);// Other alternatives   
+     }
+   break;                                    // Exit cycle
    }
+   
+}
+
+int getFreeMagicNumber() {
+   magic = -1;
+   int i = 0;
+   while(i < magic_numbers_size && magic==-1){
+      if(magic_numbers[i]==-1)
+         magic = i;
+   }
+   
+   if(magic == -1) { // No free magic numbers, double the array size
+      initMagicNumbers(new_size=magic_numbers_size*2, old_size=magic_numbers_size);
+      magic = getFreeMagicNumber();
+   }
+   
+   return magic;
+}
+
+void removeMagicNumber(int n){
+      magic_numbers[i] = -1;
+   return;
 }
 
 int oppositeOp(int op) {
