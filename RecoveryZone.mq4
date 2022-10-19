@@ -12,6 +12,7 @@
 //|                                                                  |
 //+------------------------------------------------------------------+
 
+/*
 class trade {
  public:
    string  currency;        // currency of the trade
@@ -29,6 +30,7 @@ class trade {
 //+------------------------------------------------------------------+
 //| Parametric constructor                                           |
 //+------------------------------------------------------------------+
+
 trade::trade(string cur, string t_type, short t_entry, double t_tp, double t_sl, int MNum, int n_ord) {
    string  currency = cur;        // currency of the trade
    string  trade_type = t_type;      // BUY, SELL
@@ -38,7 +40,7 @@ trade::trade(string cur, string t_type, short t_entry, double t_tp, double t_sl,
    int MagicNumber = MNum;         // Magic Number
    int n_order = n_ord;             // Number of order wrt trade (1 <= n_order <= max_trade_orders)
 }
- 
+*/
 extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
 extern double first_trade_size = 0.1
 extern double size_multipler = 1; // 1 is strongly recommended to reduce losses
@@ -51,7 +53,7 @@ extern double trades_sizes[10] = {0.1, 0.14, 0.1, 0.14, 0.19, 0.25, 0.33, 0.44, 
 
 
 // To be instantiated in OnInit()
-double account_margin = -1;
+double account_free_margin = -1;
 double account_equity = -1;
 double trade_size_required = -1; // Dictionary needed for multicurrency
 double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency and/or different leverage
@@ -59,15 +61,16 @@ double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency a
 
 // To be updated at each new position opening
 int free_trades; // How many trades can I start with the current margin?
-int busy_magic_numbers[];
-trade trades[]; // array of arrays of trades
+int magic_numbers[];
+int magic_numbers_size = 0;
+//trade trades[]; // array of arrays of trades
  /*
 e.g. 
-			trades[0] = [{"EURUSD", "BUY", 0.99880, 0.99990, 0.99780, 001, 1}, 
-			             {"EURUSD", "SELL", 0.99880, 0.99990, 0.99780, 001, 2}, 
-			             ...
-			            ]
-			trades[1] = {"EURCHF", "BUY", 0.99880, 0.99990, 0.99780, 002, 1}
+         trades[0] = [{"EURUSD", "BUY", 0.99880, 0.99990, 0.99780, 001, 1}, 
+                      {"EURUSD", "SELL", 0.99880, 0.99990, 0.99780, 001, 2}, 
+                      ...
+                     ]
+         trades[1] = {"EURCHF", "BUY", 0.99880, 0.99990, 0.99780, 002, 1}
 */
 
   
@@ -80,16 +83,29 @@ int OnInit()
 
    // Parameters check
    if (max_trade_orders > 10)
-      return(INIT_PARAMETERS_INCORRECT);
+      return(INIT_PARAMETERS_INCORRECT); // Not tested
 
    // Getting equity
-   Print("Account equity = ",AccountEquity());
+   account_equity = AccountEquity()
+   Print("Account equity = ", account_equity);
    
    // Getting free margin
-   Print("Account free margin = ",AccountFreeMargin());
+   account_free_margin = AccountFreeMargin()
+   Print("Account free margin = ", account_free_margin);
    
    // Calculate size needed for a trade (worst scenario: max_trade_orders)
    trade_size_required = getRequiredSize();
+   
+   // Allocate magic_numbers array
+   if(ArrayResize(magic_numbers, (account_equity/trade_size_required)*2 < 0) {
+      return(INIT_FAILED);
+   }
+   
+   // Initializing magic_numbers array to -1
+   magic_numbers_size = ArraySize(magic_numbers);
+   for(int i=0; i<magic_numbers_size; i++){
+      magic_numbers[i] = -1;
+   }
    
    return(INIT_SUCCEEDED);
 }
@@ -106,50 +122,33 @@ void OnTick()
       
       if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown
          // Look for 1st operation
-         market, op_type, tp, sl, magic_nr = marketScan()
+         int scan = marketScan()
+         
+         if(scan!=0) {
+            Print("Error", scan);
+         }
       }
-      
-      /*
-      // Look for 1st operation
-        market, op_type, tp, sl, magic_nr = marketScan()
-      
-        # If opportunities and enough margin
-        if (marginFlag="GREEN" and market!=NULL) {
-        	int err = opentrade(market, op_type, tp, sl, magic_nr)
-      	if(err!=0) {
-      		print("Error opening tradeision")
-      	}
-      
-      	int err = setRecoOrders(market, op_type, tp, sl, magic_nr)
-      	if(err!=0) {
-      		print("Error setting recovery orders")
-      	}
-        }
-      
-        else{
-        	if(market==NULL)
-        		print("No opportunities")
-        	if(marginFlag=="RED")
-        		print("No enough margin")
-        }
-            */
-        }
+     
+}
 
 
-trade marketScan() {
+int marketScan() {
    string market = "EURUSD";
    
    
-   string type = OP_BUY;
+   int type = OP_BUY;
    int magic_number = getFreeMagicNumber();
    
-   // open at sell
-   double price;
-   double tp;
-   double sl;
-   
-   //OrderSend(Symbol(),OP_BUY,0.1,Ask,2,Bid-15*Point,Bid+15*Point);
-   OrderSend("EURUSD", OP_BUY, trades_sizes[0], Ask, 2, Bid-(tp_pips+reco_pips)*Point, Bid+tp_pips*Point);
+   // https://docs.mql4.com/trading/ordersend
+   OrderSend(symbol = "EURUSD", 
+             cmd = OP_BUY, 
+             volume = trades_sizes[0], 
+             price = Ask, 
+             slippage = 2, 
+             stoploss = Bid-(tp_pips+reco_pips)*Point, 
+             takeprofit = Bid+tp_pips*Point,
+             comment = "1",   // we also have "expiration" parameter
+             magic = magic_number);
    
    // Error checking
    int Error=GetLastError();                 // Failed :(
@@ -180,37 +179,105 @@ trade marketScan() {
      }
    break;                                    // Exit cycle
    }
-   
-   // Fetch order and fill trades structure
-      // set tp
-      // set sl;
-      
-      // set next trade
-      // add struct to trades
-   
+    
 }
 
 void checkOrders() {
-   // Close pending orders if TP or SL have been hit
-   
    /*
-   for trade in trades:
-		if(trade.OP_MagicNumber is not in in myOpentrades)
-			remove trade from trade
-	*/
-	
-	
-	// Trailing stop
-	// Trail the SL if only 1st trade is opened and 
-	
-	/*
-	for trade in trades:
-		if(only 1st trade is opened)
-			if(currentPrice > buy + (TP/2) pips):
-				cancell all orders
-				SL = currentPrice - (TP/2) pips
-				TP = TP + (TP/2)
+   Three scenarios for each trade (i.e. MagicNumber):
+   
+   How many orders do I have with its MagicNumber?
+   
+   - Zero trades:    // TP and/or SL have been hit.
+            Remove MagicNumber
+            
+   - 1 trade.
+   
+         - Pending:
+            Is it the 1st?
+               - Yes: do nothing
+               - No: delete it, TP has been hit
+            
+         - Open:
+            1. Did I set the next order (<= max_trade_orders)?
+               - Yes: do nothing
+               - No: do it
+            2. Trail stop here   
+   
+         - Closed:
+            Take profit hit. // It would mean that price moved of tp_pips in less than one candle!
+
+   - 2 to max_trade_orders - 1
+         
+         How many are pending?
+         
+            - Zero: set opposite operation with same MagicNumber
+            
+            - One: do nothing
+            
+            - More: error
+   
+   - max_trade_orders
+   
+         Do nothing
+         
    */
+   
+   for(int i=0; i<magic_numbers_size; i++) {
+      
+      int opened_orders;
+      int pending_orders;
+      int total_trades;
+         
+      if(magic_numbers[i]!= -1){
+            
+         opened_orders = 0;
+         pending_orders = 0;
+         total_orders = 0;
+         
+         // Counting opened and pending orders for this magic_number
+         for (int i = 0; i < OrdersTotal(); i++) {
+            if( OrderSelect( i, SELECT_BY_POS, MODE_TRADES ) == false ) {
+               Print("ERROR - Unable to select the order - ",GetLastError());
+               break;
+            } 
+            // If the Magic Number of the order matches the Magic Number entered at the beginning.
+            if(OrderMagicNumber()==magic_numbers[i]){
+               if(OrderType() != OP_BUY && OrderType() != OP_SELL) {
+                  pending_orders++;
+               } else {
+                  opened_orders++;
+               }
+            }
+         }
+         
+         total_orders = opened_orders + pending_orders;
+         
+         switch(total_orders)
+            {
+            case 0:
+            
+            
+            case 1:
+            
+            
+            default:
+               if(<max_trade_orders) { // between 2 and max_trade_orders-1 orders 
+               
+               
+               
+               }
+         
+            }
+      
+      
+      }
+   }
+}
+
+int oppositeOp(int op) {
+   if(op==OP_BUY || op==OP_BUYLIMIT || op==OP_BUYSTOP) return OP_SELLSTOP;
+   if(op==OP_SELL || op==OP_SELLLIMIT || op==OP_SELLSTOP) return OP_BUYSTOP;   
 }
 
 // Returns the max total size needed to start a trade (worst scenario)
