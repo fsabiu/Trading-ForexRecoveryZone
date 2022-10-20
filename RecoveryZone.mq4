@@ -36,13 +36,7 @@ int magic_numbers_size;
   
 
 int OnInit()
-  {
-
-   // If broker/market allows increments of 0.1 lots, update the nor_lot variable
-   if(MarketInfo(Symbol(),MODE_LOTSTEP)!=0.1) {
-      Alert("Increments of 0.1 lots not allowed!");
-   }
-   
+  {   
    // Variables
    magic_numbers_cont = 0;
    magic_numbers_size = 0;
@@ -53,14 +47,15 @@ int OnInit()
 
    // Getting equity
    account_equity = AccountEquity();
-   Print("Account equity = ", account_equity);
+   Print("Account equity: ", account_equity);
    
    // Getting free margin
    account_free_margin = AccountFreeMargin();
-   Print("Account free margin = ", account_free_margin);
+   Print("Account free margin: ", account_free_margin);
    
    // Calculate size needed for a trade (worst scenario: max_trade_orders)
    trade_size_required = getRequiredSize();
+   Print("Size required by a trade: ", trade_size_required);
    
    // Allocate magic_numbers array and initializing elements to -1 
    initMagicNumbers(MathRound((account_equity/trade_size_required)*2), 0);
@@ -89,14 +84,11 @@ void OnTick()
       
       // Enough margin to open a trade?
       int free_trades = getFreeTrades();
+      Print("Free trades: ", free_trades);
       
       if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown allowed
          // Look for 1st operation
          int scan = marketScan();
-         
-         if(scan!=0) {
-            Print("Error", scan);
-         }
       }
      
 }
@@ -109,21 +101,22 @@ int marketScan() {
    int magic_number = getFreeMagicNumber();
    
    // https://docs.mql4.com/trading/ordersend
-   int err = OrderSend("EURUSD", 
+   int res = OrderSend(Symbol(), 
              OP_BUY, 
              trades_sizes[0], 
              Ask, 
              2, 
-             Bid-(tp_pips+reco_pips)*Point, 
-             Bid+tp_pips*Point,
+             Bid-(tp_pips+reco_pips)*Point*10, 
+             Bid+tp_pips*Point*10,
              "1",   // we also have "expiration" parameter
              magic_number);
    
    
    // Error checking
-   
+   int err = GetLastError();
    switch(err)                             // Overcomable errors
-     {
+     {case 0:
+         break;
       case 129:Alert("Invalid price. Retrying..");
          RefreshRates();                     // Update data
       case 135:Alert("The price has changed. Retrying..");
@@ -131,9 +124,7 @@ int marketScan() {
       case 146:Alert("Trading subsystem is busy. Retrying..");
          Sleep(500);                         // Simple solution
          RefreshRates();                     // Update data
-     }
-   switch(err)                             // Critical errors
-     {
+         
       case 2 : Alert("Common error.");
          break;                              // Exit 'switch'
       case 5 : Alert("Outdated version of the client terminal.");
@@ -212,13 +203,18 @@ void checkOrders() {
                   break;
                }
                
-               // is there a pending order?
-               if(pending_orders == 1){
-                  Print("Wait...");
+               if(opened_orders==0 && pending_orders == 1){
+                  // If it's not the 1st, cancel it
+                  cancelOrderIfNotFirst(magic);
+                  
+                  Print("Closed");
                }
                
                if(pending_orders == 0 && opened_orders < max_trade_orders) {
+                  Print("First order type: ", first_order_type);
+                  Print("Open orders: ", opened_orders, ", pending orders: ", pending_orders);
                   int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
+                  Print("Order nr ", opened_orders+1);
                }
                break;
             } 
@@ -226,6 +222,18 @@ void checkOrders() {
    }
 }
 
+int cancelOrderIfNotFirst(int magic) {
+
+   for(int i=OrdersTotal()-1;i>=0;i--){
+      if((OrderSelect(i,SELECT_BY_POS,MODE_TRADES))&&(OrderMagicNumber()==magic)) {
+         if(OrderComment()!="1"){
+            OrderDelete(OrderTicket());
+         }
+      }
+   }
+   
+   return 0;
+}
 
 int sendNextOrder(string symbol, int first_order_type, double first_order_price, int opened_orders, int magic_number) {
 
@@ -235,38 +243,39 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    double new_order_tp = -1;
    double new_order_sl = -1;
    
+   Print("First order type: ", first_order_type);
    switch(first_order_type)
       {
       case OP_BUY:
             if(opened_orders % 2 == 0) { // Buy
                new_order_type = OP_BUYSTOP;
                new_order_price = first_order_price;
-               new_order_tp = first_order_price + tp_pips*Point;
-               new_order_sl = first_order_price - (tp_pips + reco_pips)*Point;
+               new_order_tp = first_order_price + tp_pips*Point*10;
+               new_order_sl = first_order_price - (tp_pips + reco_pips)*Point*10;
             }else { // Sell
                new_order_type = OP_SELLSTOP;
-               new_order_price = first_order_price - reco_pips*Point;
-               new_order_tp = first_order_price - (tp_pips + reco_pips)*Point;
-               new_order_sl = first_order_price + tp_pips*Point;
+               new_order_price = first_order_price - reco_pips*Point*10;
+               new_order_tp = first_order_price - (tp_pips + reco_pips)*Point*10;
+               new_order_sl = first_order_price + tp_pips*Point*10;
             }
             break;
       case OP_SELL:
             if(opened_orders % 2 == 0) { // Sell
                new_order_type = OP_SELLSTOP;
                new_order_price = first_order_price;
-               new_order_tp = first_order_price - tp_pips*Point;
-               new_order_sl = first_order_price + (tp_pips + reco_pips)*Point;
+               new_order_tp = first_order_price - tp_pips*Point*10;
+               new_order_sl = first_order_price + (tp_pips + reco_pips)*Point*10;
             }else{
                new_order_type = OP_BUYSTOP;
-               new_order_price = first_order_price - reco_pips*Point;
-               new_order_tp = first_order_price + (tp_pips + reco_pips)*Point;
-               new_order_sl = first_order_price - tp_pips*Point;
+               new_order_price = first_order_price - reco_pips*Point*10;
+               new_order_tp = first_order_price + (tp_pips + reco_pips)*Point*10;
+               new_order_sl = first_order_price - tp_pips*Point*10;
             }
             break;
       }
    
    // Send Order
-   int err = OrderSend(symbol, // symbol
+   int res = OrderSend(Symbol(), // symbol
              new_order_type,  // cmd
              new_order_size,  // volume
              new_order_price, // price
@@ -277,8 +286,12 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
              magic_number);   //magic
     
    // Error checking
+   int err = GetLastError();
    switch(err)                             // Overcomable errors
      {
+      case 0:
+         Print("Order placed at ", new_order_price, " sl: ", new_order_sl, " tp: ", new_order_tp);
+         break;
       case 129:Alert("Invalid price. Retrying..");
          RefreshRates();                     // Update data
       case 135:Alert("The price has changed. Retrying..");
@@ -286,9 +299,6 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
       case 146:Alert("Trading subsystem is busy. Retrying..");
          Sleep(500);                         // Simple solution
          RefreshRates();                     // Update data
-     }
-   switch(err)                             // Critical errors
-     {
       case 2 : Alert("Common error.");
          break;                              // Exit 'switch'
       case 5 : Alert("Outdated version of the client terminal.");
@@ -341,9 +351,9 @@ int oppositeOp(int op) {
 // Returns the max total size needed to start a trade (worst scenario)
 double getRequiredSize() {
 
-   int required_size = 0;
+   double required_size = 0;
    
-   for (int i = 0; i<=max_trade_orders; i++) {
+   for (int i = 0; i < max_trade_orders; i++) {
       required_size += trades_sizes[i];
    }
    
@@ -357,11 +367,17 @@ int getFreeTrades(){
    int free_trades = 0;
    
    // Worst case for the currently opened trades
-   double current_trades = trade_size_required*ArraySize(magic_numbers);
+   double current_trades = trade_size_required*magic_numbers_cont;
    
    // TODO consider trades with trail stop or SL at breakeven
    double size_required = trade_size_required*eurperlot; // size required by a trade with current size
    double potential_busy_margin = size_required*current_trades;
+   
+   /*
+   Print("Size required: ", size_required);
+   Print("Trade size required: ", trade_size_required);
+   Print("Eur per lot: ", eurperlot);
+   */
    
    // Margin level = (Equity/Used Margin) X 100
    // Margin level if another position is opened (+size_required)
