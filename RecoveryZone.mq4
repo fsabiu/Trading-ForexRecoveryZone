@@ -58,7 +58,13 @@ int OnInit()
    Print("Size required by a trade: ", trade_size_required);
    
    // Allocate magic_numbers array and initializing elements to -1 
-   initMagicNumbers(MathRound((account_equity/trade_size_required)*2), 0);
+   Print("Trade size required ", trade_size_required);
+   Print("Eurperlot ", eurperlot);
+   Print("trade_size_required*eurperlot ", trade_size_required*eurperlot);
+   
+   int sz = MathRound((account_equity)/(trade_size_required*eurperlot))*2.0;
+   Print("Size::::", sz);
+   initMagicNumbers(sz, 0);
    
    return(INIT_SUCCEEDED);
 }
@@ -317,9 +323,11 @@ int getFreeMagicNumber() {
    int magic = -1;
    int i = 0;
    while(i < magic_numbers_size && magic==-1){
-      if(magic_numbers[i]==-1)
+      if(magic_numbers[i]==-1) {
          magic = i;                    // Select
          magic_numbers[magic] = magic; // Set to busy
+      }
+      i++;
    }
    
    if(magic == -1) { // No free magic numbers, double the array size
