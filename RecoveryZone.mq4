@@ -20,6 +20,10 @@ extern int max_trade_orders = 8;
 extern int tp_pips = 60;
 extern int reco_pips = 20;
 
+// Trading hours
+extern int start_hour = 6;
+extern int end_hour = 16;
+
 double trades_sizes[10] = {0.1, 0.14, 0.1, 0.14, 0.19, 0.25, 0.33, 0.44, 0.59, 0.78};
 string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 
@@ -92,7 +96,7 @@ void OnTick()
       int free_trades = getFreeTrades();
       Print("Free trades: ", free_trades);
       
-      if(free_trades>0) { //How many 1st operations can I open? Also depends on maximal drawdown allowed
+      if(free_trades>0 && isTradingSession() ) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
          // Look for 1st operation
          int scan = marketScan();
       }
@@ -401,4 +405,25 @@ int getFreeTrades(){
    }
    
    return free_trades;
+}
+
+bool isTradingSession()
+{
+    if (start_hour < end_hour)
+    {
+        if (Hour() >= start_hour && Hour() <= end_hour)
+            return (true);
+        return (false);
+    }
+    if (start_hour > end_hour)
+    {
+        if (Hour() >= start_hour && Hour() <= end_hour)
+            return (true);
+        if (Hour() <= end_hour)
+            return (true);
+        return (false);
+    }
+    if (Hour() == start_hour)
+        return (true);
+    return (false);
 }
