@@ -12,14 +12,15 @@
 //|                                                                  |
 //+------------------------------------------------------------------+
 
-extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
+//extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
 extern double first_trade_size = 0.1;
-extern double size_multipler = 1; // 1 is strongly recommended to reduce losses
+extern double size_multipler = 1; // Size multiplier
 extern int slippage = 2;
 extern int max_trade_orders = 8;
 extern int tp_pips = 60;
-extern int reco_pips = 20;
+extern int reco_pips = 20; 
 
+extern int period = 5; // Period (min)
 // Trading hours
 extern int start_hour = 6;
 extern int end_hour = 16;
@@ -31,13 +32,17 @@ string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 double account_free_margin = -1;
 double account_equity = -1;
 double trade_size_required = -1; // Dictionary needed for multicurrency
-double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency and/or different leverage
+//double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency and/or different leverage
+double eurperlot = 4000;
 
 // To be updated at each new position opening
 int magic_numbers[];
 int magic_numbers_cont;
 int magic_numbers_size;
+int magic_numbers_trades[];
   
+
+int tradesnr = 0;
 
 int OnInit()
   {   
@@ -79,9 +84,13 @@ void initMagicNumbers(int new_size, int old_size) {
    if(ArrayResize(magic_numbers, magic_numbers_size)< 0) {
       Alert("Array resizing failed!");
    }
+   if(ArrayResize(magic_numbers_trades, magic_numbers_size)< 0) {
+      Alert("Array resizing failed!");
+   }
    
    for(int i = old_size; i < magic_numbers_size; i++){
       magic_numbers[i] = -1;
+      magic_numbers_trades[i] = 0;
    }
 }
 
@@ -89,18 +98,22 @@ void initMagicNumbers(int new_size, int old_size) {
 void OnTick()
   {
 
-      // Check orders
+      // Check orders every minute
       checkOrders();
       
-      // Enough margin to open a trade?
-      int free_trades = getFreeTrades();
-      Print("Free trades: ", free_trades);
-      
-      if(free_trades>0 && isTradingSession() ) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
-         // Look for 1st operation
-         int scan = marketScan();
+      // Trade every "period" minutes
+      if(Minute() % period == 0) {
+         Print("5 mins");
+         Print(TimeCurrent());
+         // Enough margin to open a trade?
+         int free_trades = getFreeTrades();
+         Print("OnTick(): Free trades: ", free_trades);
+         
+         if(free_trades>0 && isTradingSession() ) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
+            // Look for 1st operation
+            int scan = marketScan();
+         }
       }
-     
 }
 
 
@@ -126,24 +139,26 @@ int marketScan() {
    int err = GetLastError();
    switch(err)                             // Overcomable errors
      {case 0:
+         tradesnr++;
+         magic_numbers_trades[magic_number] = 1;
          break;
-      case 129:Alert("Invalid price. Retrying..");
+      case 129:Alert("marketScan(): Invalid price. Retrying..");
          RefreshRates();                     // Update data
-      case 135:Alert("The price has changed. Retrying..");
+      case 135:Alert("marketScan(): The price has changed. Retrying..");
          RefreshRates();                     // Update data
-      case 146:Alert("Trading subsystem is busy. Retrying..");
+      case 146:Alert("marketScan(): Trading subsystem is busy. Retrying..");
          Sleep(500);                         // Simple solution
          RefreshRates();                     // Update data
          
-      case 2 : Alert("Common error.");
+      case 2 : Alert("marketScan(): Common error.");
          break;                              // Exit 'switch'
-      case 5 : Alert("Outdated version of the client terminal.");
+      case 5 : Alert("marketScan(): Outdated version of the client terminal.");
          break;                              // Exit 'switch'
-      case 64: Alert("The account is blocked.");
+      case 64: Alert("marketScan(): The account is blocked.");
          break;                              // Exit 'switch'
-      case 133:Alert("Trading fobidden");
+      case 133:Alert("marketScan(): Trading fobidden");
          break;                              // Exit 'switch'
-      default: Alert("Occurred error ",err);// Other alternatives   
+      default: Alert("marketScan(): Occurred error ",err);// Other alternatives   
      }
    
    return err;
@@ -187,49 +202,71 @@ void checkOrders() {
                   pending_orders++;
                } else {
                   opened_orders++;
-                  if(OrderOpenTime() < first_order_time) { // Saving info of 1st order
+                  Print("OrderOpenTime: ", OrderOpenTime());
+                  Print("FirstOrderTime: ", first_order_time);
+                  if(OrderOpenTime() <= first_order_time) { // Saving info of 1st order
                      first_order_type = OrderType();
                      first_order_time = OrderOpenTime();
                      first_order_price = OrderOpenPrice();
                      first_order_symbol = OrderSymbol();
+                     Print("CheckOrders(): First order type found: ", first_order_type);
                   }
                }
             }
          }
          
          total_orders = opened_orders + pending_orders;
+         Print("CheckOrders(): Total orders: ", total_orders);
+         Print("CheckOrders(): Open orders: ", opened_orders);
+         Print("CheckOrders():Pending orders: ", pending_orders);
          
          switch(total_orders)
             {
             case 0:
                // Remove Magic Number, TP or SL hit
+               Print("Placed order CLOSED!");
                removeMagicNumber(magic);
                break;
             
             default: // total_orders > 1
                // Checks
                if(pending_orders > 1){
-                  Alert("Too many pending orders!"); // We should not have more pending orders for a magic number
-                  break;
+                  Alert("CheckOrders(): Too many pending orders!"); // We should not have more pending orders for a magic number
                }
                
                if(opened_orders==0 && pending_orders == 1){
                   // If it's not the 1st, cancel it
                   cancelOrderIfNotFirst(magic);
                   
-                  Print("Closed");
+                  Print("CheckOrders(): Closed");
                }
                
-               if(pending_orders == 0 && opened_orders < max_trade_orders) {
-                  Print("First order type: ", first_order_type);
-                  Print("Open orders: ", opened_orders, ", pending orders: ", pending_orders);
-                  int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
-                  Print("Order nr ", opened_orders+1);
+               if(pending_orders == 0 && opened_orders < max_trade_orders && magic_numbers_trades[magic] > opened_orders){
+                  cancelAllOrders(magic);
                }
+               
+               if(pending_orders == 0 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
+                  Print("SENDING ORDER WITH LOTS ", trades_sizes[opened_orders]);
+                  Print("CheckOrders(): First order type: ", first_order_type);
+                  Print("CheckOrders(): Open orders: ", opened_orders, ", pending orders: ", pending_orders);
+                  int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
+                  Print("CheckOrders(): Order nr ", opened_orders+1);
+               }  
                break;
             } 
       }  
    }
+}
+
+int cancelAllOrders(int magic) {
+
+   for(int i=OrdersTotal()-1;i>=0;i--){
+      if((OrderSelect(i,SELECT_BY_POS,MODE_TRADES))&&(OrderMagicNumber()==magic)) {
+            OrderDelete(OrderTicket());
+      }
+   }
+   
+   return 0;
 }
 
 int cancelOrderIfNotFirst(int magic) {
@@ -300,20 +337,25 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    switch(err)                             // Overcomable errors
      {
       case 0:
-         Print("Order placed at ", new_order_price, " sl: ", new_order_sl, " tp: ", new_order_tp);
+         tradesnr++;
+         magic_numbers_trades[magic_number] = magic_numbers_trades[magic_number] + 1;
+         Print("sendNextOrder(): #", tradesnr, " Order placed at ", new_order_price, " sl: ", new_order_sl, " tp: ", new_order_tp, " size: ", new_order_size);
+         Print("sendNextOrder(): magic nr: ", magic_number, " opened orders: ", opened_orders);
+         Print("Balance: ", AccountBalance());
+         Print("Equity: ", AccountEquity());
          break;
-      case 129:Alert("Invalid price. Retrying..");
+      case 129:Alert("sendNextOrder(): Invalid price. Retrying..");
          RefreshRates();                     // Update data
-      case 135:Alert("The price has changed. Retrying..");
+      case 135:Alert("sendNextOrder(): The price has changed. Retrying..");
          RefreshRates();                     // Update data
-      case 146:Alert("Trading subsystem is busy. Retrying..");
+      case 146:Alert("sendNextOrder(): Trading subsystem is busy. Retrying..");
          Sleep(500);                         // Simple solution
          RefreshRates();                     // Update data
-      case 2 : Alert("Common error.");
+      case 2 : Alert("sendNextOrder(): Common error.");
          break;                              // Exit 'switch'
-      case 5 : Alert("Outdated version of the client terminal.");
+      case 5 : Alert("sendNextOrder(): Outdated version of the client terminal.");
          break;                              // Exit 'switch'
-      case 64: Alert("The account is blocked.");
+      case 64: Alert("sendNextOrder(): The account is blocked.");
          break;                              // Exit 'switch'
       case 133:Alert("Trading fobidden");
          break;                              // Exit 'switch'
