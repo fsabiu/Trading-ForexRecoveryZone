@@ -132,11 +132,14 @@ int marketScan() {
    if(num == 5) { // => prob 0.1
       string market = "EURUSD";
    
-      int type = OP_BUY;
       int magic_number = getFreeMagicNumber();
       
-      // https://docs.mql4.com/trading/ordersend
-      int res = OrderSend(Symbol(), 
+      num = MathRand()%10 + 1;
+      int res;   
+      
+      if(num<=5) { // Buy with probability 0.5
+        // https://docs.mql4.com/trading/ordersend
+         res = OrderSend(Symbol(), 
                 OP_BUY, 
                 trades_sizes[0], 
                 Ask, 
@@ -144,7 +147,19 @@ int marketScan() {
                 Bid-(tp_pips+reco_pips)*Point*10, 
                 Bid+tp_pips*Point*10,
                 "1",   // we also have "expiration" parameter
-                magic_number);
+                magic_number); 
+      } else{ // Sell with probability 0.5
+         res = OrderSend(Symbol(), 
+                OP_SELL, 
+                trades_sizes[0], 
+                Bid, 
+                2, 
+                Ask+(tp_pips+reco_pips)*Point*10, 
+                Ask-tp_pips*Point*10,
+                "1",   // we also have "expiration" parameter
+                magic_number); 
+      }
+      
       
       
       // Error checking
@@ -408,7 +423,7 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
                }
             }else{
                new_order_type = OP_BUYSTOP;
-               new_order_price = first_order_price - reco_pips*Point*10;
+               new_order_price = first_order_price + reco_pips*Point*10;
                new_order_tp = first_order_price + (tp_pips + reco_pips)*Point*10;
                new_order_sl = first_order_price - tp_pips*Point*10;
                if(conservative_stop==true){
