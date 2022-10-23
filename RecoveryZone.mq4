@@ -25,6 +25,9 @@ extern int period = 5; // Period (min)
 extern int start_hour = 6;
 extern int end_hour = 16;
 
+// Conservative stop loss
+extern bool conservative_stop = false; // Conservative SL
+
 double trades_sizes[10] = {0.1, 0.14, 0.1, 0.14, 0.19, 0.25, 0.33, 0.44, 0.59, 0.78};
 string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 
@@ -118,50 +121,54 @@ void OnTick()
 
 
 int marketScan() {
-   string market = "EURUSD";
+   int num = MathRand()%10 + 1; // int btw 1 and 10
+   if(num == 5) { // => prob 0.1
+      string market = "EURUSD";
    
-   int type = OP_BUY;
-   int magic_number = getFreeMagicNumber();
-   
-   // https://docs.mql4.com/trading/ordersend
-   int res = OrderSend(Symbol(), 
-             OP_BUY, 
-             trades_sizes[0], 
-             Ask, 
-             2, 
-             Bid-(tp_pips+reco_pips)*Point*10, 
-             Bid+tp_pips*Point*10,
-             "1",   // we also have "expiration" parameter
-             magic_number);
-   
-   
-   // Error checking
-   int err = GetLastError();
-   switch(err)                             // Overcomable errors
-     {case 0:
-         tradesnr++;
-         magic_numbers_trades[magic_number] = 1;
-         break;
-      case 129:Alert("marketScan(): Invalid price. Retrying..");
-         RefreshRates();                     // Update data
-      case 135:Alert("marketScan(): The price has changed. Retrying..");
-         RefreshRates();                     // Update data
-      case 146:Alert("marketScan(): Trading subsystem is busy. Retrying..");
-         Sleep(500);                         // Simple solution
-         RefreshRates();                     // Update data
-         
-      case 2 : Alert("marketScan(): Common error.");
-         break;                              // Exit 'switch'
-      case 5 : Alert("marketScan(): Outdated version of the client terminal.");
-         break;                              // Exit 'switch'
-      case 64: Alert("marketScan(): The account is blocked.");
-         break;                              // Exit 'switch'
-      case 133:Alert("marketScan(): Trading fobidden");
-         break;                              // Exit 'switch'
-      default: Alert("marketScan(): Occurred error ",err);// Other alternatives   
-     }
-   
-   return err;
+      int type = OP_BUY;
+      int magic_number = getFreeMagicNumber();
+      
+      // https://docs.mql4.com/trading/ordersend
+      int res = OrderSend(Symbol(), 
+                OP_BUY, 
+                trades_sizes[0], 
+                Ask, 
+                2, 
+                Bid-(tp_pips+reco_pips)*Point*10, 
+                Bid+tp_pips*Point*10,
+                "1",   // we also have "expiration" parameter
+                magic_number);
+      
+      
+      // Error checking
+      int err = GetLastError();
+      switch(err)                             // Overcomable errors
+        {case 0:
+            tradesnr++;
+            magic_numbers_trades[magic_number] = 1;
+            break;
+         case 129:Alert("marketScan(): Invalid price. Retrying..");
+            RefreshRates();                     // Update data
+         case 135:Alert("marketScan(): The price has changed. Retrying..");
+            RefreshRates();                     // Update data
+         case 146:Alert("marketScan(): Trading subsystem is busy. Retrying..");
+            Sleep(500);                         // Simple solution
+            RefreshRates();                     // Update data
+            
+         case 2 : Alert("marketScan(): Common error.");
+            break;                              // Exit 'switch'
+         case 5 : Alert("marketScan(): Outdated version of the client terminal.");
+            break;                              // Exit 'switch'
+         case 64: Alert("marketScan(): The account is blocked.");
+            break;                              // Exit 'switch'
+         case 133:Alert("marketScan(): Trading fobidden");
+            break;                              // Exit 'switch'
+         default: Alert("marketScan(): Occurred error ",err);// Other alternatives   
+        }
+      
+      return err;
+   }
+   return 0;
 }
 
 void checkOrders() {
@@ -234,6 +241,7 @@ void checkOrders() {
                   Alert("CheckOrders(): Too many pending orders!"); // We should not have more pending orders for a magic number
                }
                
+               // TP hit before last pending order triggering
                if(opened_orders==0 && pending_orders == 1){
                   // If it's not the 1st, cancel it
                   cancelOrderIfNotFirst(magic);
@@ -241,28 +249,55 @@ void checkOrders() {
                   Print("CheckOrders(): Closed");
                }
                
+               // Partial closing of orders
                if(pending_orders == 0 && opened_orders < max_trade_orders && magic_numbers_trades[magic] > opened_orders){
                   cancelAllOrders(magic);
                }
                
+               // Next order
                if(pending_orders == 0 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
                   Print("SENDING ORDER WITH LOTS ", trades_sizes[opened_orders]);
                   Print("CheckOrders(): First order type: ", first_order_type);
                   Print("CheckOrders(): Open orders: ", opened_orders, ", pending orders: ", pending_orders);
                   int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
                   Print("CheckOrders(): Order nr ", opened_orders+1);
-               }  
+               }
+               
+               // Conservative stop (just after last position opening)
+               if(pending_orders == 0 && opened_orders == max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
+                  setConservativeStopLoss(magic, first_order_type, first_order_price);
+               }
                break;
             } 
       }  
    }
 }
 
+int setConservativeStopLoss(int magic, int first_order_type, double first_order_price){
+   double new_stop_loss = 0.0;
+   
+   switch(first_order_type) {
+      case OP_BUY:
+         new_stop_loss = first_order_price - (reco_pips/2)*Point*10;
+         break;
+      case OP_SELL:
+         new_stop_loss = first_order_price + (reco_pips/2)*Point*10;
+         break;
+   }
+   
+   for(int i=OrdersTotal()-1;i>=0;i--){
+      if((OrderSelect(i,SELECT_BY_POS,MODE_TRADES))&&(OrderMagicNumber()==magic)) {
+         int res = OrderModify(OrderTicket(),OrderOpenPrice(), new_stop_loss, OrderTakeProfit(), OrderExpiration(), 0);
+      }
+   }
+   
+   return 0;
+}
 int cancelAllOrders(int magic) {
 
    for(int i=OrdersTotal()-1;i>=0;i--){
       if((OrderSelect(i,SELECT_BY_POS,MODE_TRADES))&&(OrderMagicNumber()==magic)) {
-            OrderDelete(OrderTicket());
+            int res = OrderDelete(OrderTicket());
       }
    }
    
@@ -299,11 +334,17 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
                new_order_price = first_order_price;
                new_order_tp = first_order_price + tp_pips*Point*10;
                new_order_sl = first_order_price - (tp_pips + reco_pips)*Point*10;
+               if(conservative_stop==true){
+                  new_order_sl = first_order_price - (reco_pips/2)*Point*10;
+               }
             }else { // Sell
                new_order_type = OP_SELLSTOP;
                new_order_price = first_order_price - reco_pips*Point*10;
                new_order_tp = first_order_price - (tp_pips + reco_pips)*Point*10;
                new_order_sl = first_order_price + tp_pips*Point*10;
+               if(conservative_stop==true){
+                  new_order_sl = first_order_price - (reco_pips/2)*Point*10;
+               }
             }
             break;
       case OP_SELL:
@@ -312,11 +353,17 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
                new_order_price = first_order_price;
                new_order_tp = first_order_price - tp_pips*Point*10;
                new_order_sl = first_order_price + (tp_pips + reco_pips)*Point*10;
+               if(conservative_stop==true){
+                  new_order_sl = first_order_price + (reco_pips/2)*Point*10;
+               }
             }else{
                new_order_type = OP_BUYSTOP;
                new_order_price = first_order_price - reco_pips*Point*10;
                new_order_tp = first_order_price + (tp_pips + reco_pips)*Point*10;
                new_order_sl = first_order_price - tp_pips*Point*10;
+               if(conservative_stop==true){
+                  new_order_sl = first_order_price + (reco_pips/2)*Point*10;
+               }
             }
             break;
       }
