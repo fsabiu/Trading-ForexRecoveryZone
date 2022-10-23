@@ -264,7 +264,7 @@ void checkOrders() {
                }
                
                // Conservative stop (just after last position opening)
-               if(pending_orders == 0 && opened_orders == max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
+               if(conservative_stop && pending_orders == 0 && opened_orders == max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
                   setConservativeStopLoss(magic, first_order_type, first_order_price);
                }
                break;
