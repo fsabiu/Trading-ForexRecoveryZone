@@ -24,6 +24,7 @@ extern int period = 5; // Period (min)
 // Trading hours
 extern int start_hour = 6;
 extern int end_hour = 16;
+extern bool stop_if_loss = false;
 
 // Conservative stop loss
 extern bool conservative_stop = false; // Conservative SL
@@ -35,6 +36,7 @@ string markets[5] = {"EURUSD", "EURGBP", "GBPUSD", "EURCHF", "USDCAD"};
 // To be instantiated in OnInit()
 double account_free_margin = -1;
 double account_equity = -1;
+double account_equity_prev = -1;
 double trade_size_required = -1; // Dictionary needed for multicurrency
 //double eurperlot = 3300; // Leverage 1:30, dictionary needed for multicurrency and/or different leverage
 double eurperlot = 4000;
@@ -46,8 +48,9 @@ int magic_numbers_size; // Size of the array magic_numbers
 int magic_numbers_trades[];   // Array of #orders opened for each magic number (to prevent partial closing)
 int magic_numbers_trailing[]; // Array of trailing stops. If [i]==1, trailing stop is set
   
-
 int tradesnr = 0;
+
+datetime stop_trading_until;
 
 int OnInit()
   {   
@@ -61,6 +64,7 @@ int OnInit()
 
    // Getting equity
    account_equity = AccountEquity();
+   account_equity_prev = AccountEquity();
    Print("Account equity: ", account_equity);
    
    // Getting free margin
@@ -79,6 +83,9 @@ int OnInit()
    int sz = MathRound((account_equity)/(trade_size_required*eurperlot))*2.0;
    Print("Size::::", sz);
    initMagicNumbers(sz, 0);
+   
+   // Initializing stop trading
+   stop_trading_until = TimeCurrent();
    
    return(INIT_SUCCEEDED);
 }
@@ -107,7 +114,9 @@ void initMagicNumbers(int new_size, int old_size) {
 
 void OnTick()
   {
-
+      account_equity_prev = account_equity;
+      account_equity = AccountEquity();
+      
       // Check orders every minute
       checkOrders();
       
@@ -119,7 +128,7 @@ void OnTick()
          int free_trades = getFreeTrades();
          Print("OnTick(): Free trades: ", free_trades);
          
-         if(free_trades>0 && isTradingSession() ) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
+         if(free_trades>0 && isTradingSession() && TimeCurrent() >= stop_trading_until) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
             // Look for 1st operation
             int scan = marketScan();
          }
@@ -257,6 +266,10 @@ void checkOrders() {
                // Remove Magic Number, TP or SL hit
                Print("Placed order CLOSED!");
                removeMagicNumber(magic);
+               // If enabled: if loss, stop trading for today
+               if(stop_if_loss == true && account_equity_prev > account_equity) {
+                  stopTradingUntilTomorrow();
+               }
                break;
             
             default: // total_orders >= 1
@@ -303,6 +316,12 @@ void checkOrders() {
    }
 }
 
+void stopTradingUntilTomorrow() {
+   datetime today_midnight=TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
+   stop_trading_until = today_midnight+PERIOD_D1*60; // tomorrow midnight
+   Print("Trading stopped until tomorrow!");
+}
+
 int setTrailingStop(int magic, int first_order_type, double first_order_price) {
    double new_stop_loss = 0.0;
    
@@ -316,14 +335,14 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
          switch(first_order_type) {
             case OP_BUY:
                // First trailing stop
-               if(magic_numbers_trailing[OrderMagicNumber()]==0 && profitPips > tp_pips/3) {
-                  new_stop_loss = OrderOpenPrice() + (reco_pips/6)*Point*10;
+               if(magic_numbers_trailing[OrderMagicNumber()]==0 && profitPips > tp_pips/4) {
+                  new_stop_loss = OrderOpenPrice() + (reco_pips/10)*Point*10;
                }
                
                break;
             case OP_SELL:
-               if(magic_numbers_trailing[OrderMagicNumber()]==0 && profitPips > tp_pips/3) {
-                  new_stop_loss = OrderOpenPrice() - (reco_pips/6)*Point*10;
+               if(magic_numbers_trailing[OrderMagicNumber()]==0 && profitPips > tp_pips/4) {
+                  new_stop_loss = OrderOpenPrice() - (reco_pips/10)*Point*10;
                }
                break;
          }
