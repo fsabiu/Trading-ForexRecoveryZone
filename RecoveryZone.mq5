@@ -104,39 +104,6 @@ int OnInit()
    return(INIT_SUCCEEDED);
 }
 
-void setTradesSizes(){
-   
-   for(int i=0; i<ArraySize(trades_sizes); i++) {
-      trades_sizes[i] = NormalizeDouble((size_multipler*trades_sizes[i]), 2); // Format x.xx
-      //trades_sizes[i] = RoundToDigitsUp((size_multipler*trades_sizes[i]), 2);
-   }
-
-   Print("Using sizes:");
-   for(int i=0; i<ArraySize(trades_sizes); i++) {
-      Print(trades_sizes[i]);
-   }
-}
-void initMagicNumbers(int new_size, int old_size) {
-   magic_numbers_size = new_size;
-   
-   if(ArrayResize(magic_numbers, magic_numbers_size) < 0) {
-      Alert("magic_numbers resizing failed!");
-   }
-   if(ArrayResize(magic_numbers_trades, magic_numbers_size) < 0) {
-      Alert("magic_numbers_trades resizing failed!");
-   }
-   
-   if(ArrayResize(magic_numbers_trailing, magic_numbers_size) < 0) {
-      Alert("magic_numbers_trailing resizing failed!");
-   }
-   
-   for(int i = old_size; i < magic_numbers_size; i++){
-      magic_numbers[i] = -1;
-      magic_numbers_trades[i] = 0;
-      magic_numbers_trailing[i] = 0;
-   }
-}
-
 
 void OnTick()
   {
@@ -255,7 +222,7 @@ void checkOrders() {
                Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             } 
-            if(OrderGetInteger(ORDER_MAGIC) == magic_numbers[magic]){
+            if(ord_info.Magic() == magic_numbers[magic]){
                pending_orders++;
             }
          }
@@ -267,7 +234,7 @@ void checkOrders() {
                Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             }
-            if(PositionGetInteger(POSITION_MAGIC) == magic_numbers[magic]){
+            if(pos_info.Magic() == magic_numbers[magic]){
                opened_orders++;
             }
          }
@@ -283,7 +250,7 @@ void checkOrders() {
             case 0:
                // Remove Magic Number, TP or SL hit
                Print("Placed order CLOSED!");
-               removeMagicNumber(magic);
+               setFreeMagicNumber(magic);
                // If enabled: if loss, stop trading for today
                if(stop_if_loss == true && account_equity_prev > account_equity) {
                   stopTradingUntilTomorrow();
@@ -339,6 +306,213 @@ void checkOrders() {
    }
 }
 
+
+/*	
+Size management functions	
+ - setTradesSizes()	
+ - getRequiredSize()	
+ - getFreeTrades()	
+*/
+void setTradesSizes(){
+   
+   for(int i=0; i<ArraySize(trades_sizes); i++) {
+      trades_sizes[i] = NormalizeDouble((size_multipler*trades_sizes[i]), 2); // Format x.xx
+      //trades_sizes[i] = RoundToDigitsUp((size_multipler*trades_sizes[i]), 2);
+   }
+
+   Print("Using sizes:");
+   for(int i=0; i<ArraySize(trades_sizes); i++) {
+      Print(trades_sizes[i]);
+   }
+   return;
+}
+
+// Returns the max total size needed to start a trade (worst scenario)
+double getRequiredSize() {
+
+   double required_size = 0;
+   
+   for (int i = 0; i < max_trade_orders; i++) {
+      required_size += trades_sizes[i];
+   }
+   
+   return required_size;
+}
+
+// Returns the maximum number of position that can be open with the current equitiy and opened position (which are considered to evolve according to the worst scenario)
+// i.e. how many position will keep the margin level above 100 with max_trade_orders per trade
+int getFreeTrades(){
+   
+   int free_trades = 0;
+   
+   // Worst case for the currently opened trades
+   double current_trades = trade_size_required*magic_numbers_cont;
+   
+   // TODO consider trades with trail stop or SL at breakeven
+   double size_required = trade_size_required*eurperlot; // size required by a trade with current size
+   double potential_busy_margin = size_required*current_trades;
+   
+   /*
+   Print("Size required: ", size_required);
+   Print("Trade size required: ", trade_size_required);
+   Print("Eur per lot: ", eurperlot);
+   */
+   
+   // Margin level = (Equity/Used Margin) X 100
+   // Margin level if another position is opened (+size_required)
+   double potential_margin_level = 101;
+   int trades = 1;
+   while(potential_margin_level > 100) {
+      potential_margin_level = (AccountInfoDouble(ACCOUNT_EQUITY)/(potential_busy_margin + trades*size_required))*100;
+      
+      if(potential_margin_level > 100) {
+         trades++;
+         free_trades++;
+      }
+   }
+   
+   return free_trades;
+}
+
+/*	
+Magic number management functions	
+ - initMagicNumbers()	
+ - getFreeMagicNumber()	
+ - setFreeMagicNumber()	
+*/
+
+void initMagicNumbers(int new_size, int old_size) {
+   magic_numbers_size = new_size;
+   
+   if(ArrayResize(magic_numbers, magic_numbers_size) < 0) {
+      Alert("magic_numbers resizing failed!");
+   }
+   if(ArrayResize(magic_numbers_trades, magic_numbers_size) < 0) {
+      Alert("magic_numbers_trades resizing failed!");
+   }
+   
+   if(ArrayResize(magic_numbers_trailing, magic_numbers_size) < 0) {
+      Alert("magic_numbers_trailing resizing failed!");
+   }
+   
+   for(int i = old_size; i < magic_numbers_size; i++){
+      magic_numbers[i] = -1;
+      magic_numbers_trades[i] = 0;
+      magic_numbers_trailing[i] = 0;
+   }
+}
+
+int getFreeMagicNumber() {
+   int magic = -1;
+   int i = 0;
+   while(i < magic_numbers_size && magic==-1){
+      if(magic_numbers[i]==-1) {
+         magic = i;                    // Select
+         magic_numbers[magic] = magic; // Set to busy
+      }
+      i++;
+   }
+   
+   if(magic == -1) { // No free magic numbers, double the array size
+      initMagicNumbers(magic_numbers_size*2, magic_numbers_size);
+      return getFreeMagicNumber();
+   }
+   
+   // Updating counter of current trades
+   magic_numbers_cont++;
+   
+   return magic;
+}
+
+void setFreeMagicNumber(int n){
+   magic_numbers[n] = -1;
+   magic_numbers_trades[n] = 0;
+   magic_numbers_trailing[n] = 0;
+   
+   // Updating counter of current trades
+   magic_numbers_cont--; 
+   return;
+}
+
+/*	
+Orders and positions management functions:	
+ - cancelOrderIfNotFirst()	
+ - cancelAllOrders()	
+*/
+
+int cancelOrderIfNotFirst(int magic) {
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   
+   request.action = TRADE_ACTION_REMOVE;
+   
+   COrderInfo ord_info;
+   
+   for(int i=OrdersTotal()-1;i>=0;i--){
+      if(ord_info.Select(i) && ord_info.Magic() == magic) {
+         if(ord_info.Comment() != "1") {      
+            request.order  = ord_info.Ticket();
+            ResetLastError();
+            if(!OrderSend(request,result)){
+               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+            } else{
+               Print("Order deleted");
+            }
+         }
+      }
+   }
+   
+   return 0;
+}
+
+int cancelAllOrders(int magic) {
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   
+   request.action = TRADE_ACTION_REMOVE;
+   
+   COrderInfo ord_info;
+   
+   for(int i=OrdersTotal()-1; i>=0; i--){
+      if(ord_info.SelectByIndex(i) && ord_info.Magic() == magic) {
+            //int res = OrderDelete(OrderTicket());
+            request.order  = ord_info.Ticket();
+            ResetLastError();
+            if(!OrderSend(request,result)){
+               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+            } else{
+               Print("Orders deleted");
+            }
+       }
+   }
+   
+   return 0;
+}
+
+/* Further Parameters functions:	
+ - isTradingSession()	
+ - stopTradingUntilTomorrow()	
+ - setTrailingStop()	
+ - setConservativeStopLoss()	
+*/
+
+bool isTradingSession() {
+   bool is_session;
+   
+   datetime tm=TimeCurrent(); //gets current time in datetime data type
+   string str=TimeToString(tm,TIME_MINUTES); //changing the data type to a string
+   string current = StringSubstr(str, 0, 2); //selecting the first two characters of the datetime e.g. if it's 5:00:00 then it'll save it as 5, if it's 18 it will save 18.
+   int currentTimeInt = StringToInteger(current); //changes the string to an integer
+
+   if(currentTimeInt >= start_hour && end_hour >= currentTimeInt) {
+      is_session = true;
+   } else {
+      is_session = false;
+   }
+   
+   return is_session;
+}
+
 void stopTradingUntilTomorrow() {
    datetime today_midnight = TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
    stop_trading_until = today_midnight+PERIOD_D1*60; // tomorrow midnight
@@ -366,7 +540,7 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
       } 
       
       
-      if(PositionGetInteger(POSITION_MAGIC) == magic_numbers[magic]) {
+      if(pos_info.Magic() == magic_numbers[magic]) {
 
          // Getting profit in pips
          double profitPips = pos_info.Profit() - pos_info.Swap() - pos_info.Commission(); // To be checked
@@ -447,54 +621,7 @@ int setConservativeStopLoss(int magic, int first_order_type, double first_order_
    
    return 0;
 }
-int cancelAllOrders(int magic) {
-   MqlTradeRequest request;
-   MqlTradeResult  result;
-   
-   request.action = TRADE_ACTION_REMOVE;
-   
-   COrderInfo ord_info;
-   
-   for(int i=OrdersTotal()-1; i>=0; i--){
-      if(ord_info.SelectByIndex(i) && ord_info.Magic() == magic) {
-            //int res = OrderDelete(OrderTicket());
-            request.order  = ord_info.Ticket();
-            ResetLastError();
-            if(!OrderSend(request,result)){
-               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
-            } else{
-               Print("Orders deleted");
-            }
-       }
-   }
-   
-   return 0;
-}
 
-int cancelOrderIfNotFirst(int magic) {
-   MqlTradeRequest request;
-   MqlTradeResult  result;
-   
-   request.action = TRADE_ACTION_REMOVE;
-   
-   COrderInfo ord_info;
-   
-   for(int i=OrdersTotal()-1;i>=0;i--){
-      if(ord_info.Select(i) && ord_info.Magic() == magic) {
-         if(ord_info.Comment() != "1") {      
-            request.order  = OrderGetTicket(i);
-            ResetLastError();
-            if(!OrderSend(request,result)){
-               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
-            } else{
-               Print("Order deleted");
-            }
-         }
-      }
-   }
-   
-   return 0;
-}
 
 int sendNextOrder(string symbol, int first_order_type, double first_order_price, int opened_orders, int magic_number) {
 
@@ -577,108 +704,4 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
          Print("Equity: ", AccountInfoDouble(ACCOUNT_EQUITY));
    }
    return err;
-}
-
-int getFreeMagicNumber() {
-   int magic = -1;
-   int i = 0;
-   while(i < magic_numbers_size && magic==-1){
-      if(magic_numbers[i]==-1) {
-         magic = i;                    // Select
-         magic_numbers[magic] = magic; // Set to busy
-      }
-      i++;
-   }
-   
-   if(magic == -1) { // No free magic numbers, double the array size
-      initMagicNumbers(magic_numbers_size*2, magic_numbers_size);
-      return getFreeMagicNumber();
-   }
-   
-   // Updating counter of current trades
-   magic_numbers_cont++;
-   
-   return magic;
-}
-
-void removeMagicNumber(int n){
-   magic_numbers[n] = -1;
-   magic_numbers_trades[n] = 0;
-   magic_numbers_trailing[n] = 0;
-   
-   // Updating counter of current trades
-   magic_numbers_cont--; 
-   return;
-}
-
-/*
-int oppositeOp(int op) {
-   if(op==OP_BUY || op==OP_BUYLIMIT || op==OP_BUYSTOP) return OP_SELLSTOP;
-   if(op==OP_SELL || op==OP_SELLLIMIT || op==OP_SELLSTOP) return OP_BUYSTOP;   
-}
-*/
-
-// Returns the max total size needed to start a trade (worst scenario)
-double getRequiredSize() {
-
-   double required_size = 0;
-   
-   for (int i = 0; i < max_trade_orders; i++) {
-      required_size += trades_sizes[i];
-   }
-   
-   return required_size;
-}
-
-// Returns the maximum number of position that can be open with the current equitiy and opened position (which are considered to evolve according to the worst scenario)
-// i.e. how many position will keep the margin level above 100 with max_trade_orders per trade
-int getFreeTrades(){
-   
-   int free_trades = 0;
-   
-   // Worst case for the currently opened trades
-   double current_trades = trade_size_required*magic_numbers_cont;
-   
-   // TODO consider trades with trail stop or SL at breakeven
-   double size_required = trade_size_required*eurperlot; // size required by a trade with current size
-   double potential_busy_margin = size_required*current_trades;
-   
-   /*
-   Print("Size required: ", size_required);
-   Print("Trade size required: ", trade_size_required);
-   Print("Eur per lot: ", eurperlot);
-   */
-   
-   // Margin level = (Equity/Used Margin) X 100
-   // Margin level if another position is opened (+size_required)
-   double potential_margin_level = 101;
-   int trades = 1;
-   while(potential_margin_level > 100) {
-      potential_margin_level = (AccountInfoDouble(ACCOUNT_EQUITY)/(potential_busy_margin + trades*size_required))*100;
-      
-      if(potential_margin_level > 100) {
-         trades++;
-         free_trades++;
-      }
-   }
-   
-   return free_trades;
-}
-
-
-bool isTradingSession() {
-   bool is_session;
-   
-   datetime tm=TimeCurrent(); //gets current time in datetime data type
-   string str=TimeToString(tm,TIME_MINUTES); //changing the data type to a string
-   string current = StringSubstr(str, 0, 2); //selecting the first two characters of the datetime e.g. if it's 5:00:00 then it'll save it as 5, if it's 18 it will save 18.
-   int currentTimeInt = StringToInteger(current); //changes the string to an integer
-
-   if(currentTimeInt >= start_hour && end_hour >= currentTimeInt) {
-      is_session = true;
-   } else {
-      is_session = false;
-   }
-   
-   return is_session;
 }
