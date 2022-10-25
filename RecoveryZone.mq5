@@ -96,7 +96,7 @@ int OnInit()
    initMagicNumbers(sz, 0);
    
    // Initializing stop trading
-   stop_trading_until = TimeCurrent();
+   stop_trading_until = TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
    
    return(INIT_SUCCEEDED);
 }
@@ -139,6 +139,7 @@ void OnTick()
          int free_trades = getFreeTrades();
          Print("OnTick(): Free trades: ", free_trades);
          
+         Print("Is trading session: ", isTradingSession(), " stop_trading_until: ", stop_trading_until);
          if(free_trades>0 && isTradingSession() && TimeCurrent() >= stop_trading_until) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
             // Look for 1st operation
             int scan = marketScan();
@@ -314,7 +315,7 @@ void checkOrders() {
 }
 
 void stopTradingUntilTomorrow() {
-   datetime today_midnight=TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
+   datetime today_midnight = TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
    stop_trading_until = today_midnight+PERIOD_D1*60; // tomorrow midnight
    Print("Trading stopped until tomorrow!");
 }
@@ -629,6 +630,7 @@ int getFreeTrades(){
    return free_trades;
 }
 
+/*
 bool isTradingSession() {
 
    MqlDateTime mdt;
@@ -651,4 +653,22 @@ bool isTradingSession() {
     }
     
     return (false);
+}
+*/
+
+bool isTradingSession() {
+   bool is_session;
+   
+   datetime tm=TimeCurrent(); //gets current time in datetime data type
+   string str=TimeToString(tm,TIME_MINUTES); //changing the data type to a string
+   string current = StringSubstr(str, 0, 2); //selecting the first two characters of the datetime e.g. if it's 5:00:00 then it'll save it as 5, if it's 18 it will save 18.
+   int currentTimeInt = StringToInteger(current); //changes the string to an integer
+
+   if(currentTimeInt >= start_hour && end_hour >= currentTimeInt) {
+      is_session = true;
+   } else {
+      is_session = false;
+   }
+   
+   return is_session;
 }
