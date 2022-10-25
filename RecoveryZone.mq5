@@ -18,7 +18,6 @@
 CTrade  trade;
 
 //extern ENUM_TIMEFRAMES timeframe = 5; // Timeframe
-input double first_trade_size = 0.1;
 input double size_multipler = 1; // Size multiplier
 input int slippage = 2;
 input int max_trade_orders = 8;
@@ -82,6 +81,9 @@ int OnInit()
    account_free_margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    Print("Account free margin: ", account_free_margin);
    
+   // Set sizes of trading (depends on multiplier)
+   setTradesSizes();
+   
    // Calculate size needed for a trade (worst scenario: max_trade_orders)
    trade_size_required = getRequiredSize();
    Print("Size required by a trade: ", trade_size_required);
@@ -101,6 +103,18 @@ int OnInit()
    return(INIT_SUCCEEDED);
 }
 
+void setTradesSizes(){
+   
+   for(int i=0; i<ArraySize(trades_sizes); i++) {
+      trades_sizes[i] = NormalizeDouble((size_multipler*trades_sizes[i]), 2); // Format x.xx
+      //trades_sizes[i] = RoundToDigitsUp((size_multipler*trades_sizes[i]), 2);
+   }
+
+   Print("Using sizes:");
+   for(int i=0; i<ArraySize(trades_sizes); i++) {
+      Print(trades_sizes[i]);
+   }
+}
 void initMagicNumbers(int new_size, int old_size) {
    magic_numbers_size = new_size;
    
