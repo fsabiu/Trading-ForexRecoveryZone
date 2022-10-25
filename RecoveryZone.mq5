@@ -193,8 +193,8 @@ int marketScan() {
                   ". Code description: ",trade.ResultRetcodeDescription());
          } else {
             Print("Buy() method executed successfully. Return code=",trade.ResultRetcode()," (",trade.ResultRetcodeDescription(),")");
-            tradesnr++;
-            magic_numbers_trades[magic_number] = 1;
+            tradesnr++;	
+            magic_numbers_trades[magic_number] = 1;	
             magic_numbers_trailing[magic_number] = 0;
            }
            
@@ -246,13 +246,11 @@ void checkOrders() {
          first_order_price = -1;
          first_order_symbol = "";
          
-         // Orders and positions structures
-         COrderInfo ord_info;
+         // Counting orders
+         COrderInfo ord_info;	
          CPositionInfo pos_info;
          
-         // Counting orders
          for (int i = 0; i < OrdersTotal(); i++) {
-            
             if(ord_info.SelectByIndex(i) == false ) {
                Print("ERROR - Unable to select the order - ",GetLastError());
                break;
@@ -264,9 +262,9 @@ void checkOrders() {
          
          // Counting positions (opened orders)
          for (int i = 0; i < PositionsTotal(); i++) {
-            
+            CPositionInfo pos_info;
             if(pos_info.SelectByIndex(i) == false ) {
-               Print("ERROR - Unable to select the position - ",GetLastError());
+               Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             }
             if(PositionGetInteger(POSITION_MAGIC) == magic_numbers[magic]){
@@ -274,7 +272,6 @@ void checkOrders() {
             }
          }
 
-         Print("######## ANALYSIS MAGIC, ", magic);
          
          total_orders = opened_orders + pending_orders;
          Print("CheckOrders(): Total orders: ", total_orders);
@@ -313,7 +310,7 @@ void checkOrders() {
                }
                
                // Next order: standard case 
-               if(pending_orders == 0 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0) {
+               if(pending_orders == 0 && opened_orders >=1 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0) {
                   Print("SENDING ORDER WITH LOTS ", trades_sizes[opened_orders]);
                   Print("CheckOrders(): First order type: ", first_order_type);
                   Print("CheckOrders(): Open orders: ", opened_orders, ", pending orders: ", pending_orders);
@@ -327,12 +324,12 @@ void checkOrders() {
                }
                
                // Trailing stop
-               Print("Trailing checks");
-               Print("opened_orders ", opened_orders);
-               Print("magic_numbers_trades[magic] ", magic_numbers_trades[magic]);
+               Print("Trailing checks");	
+               Print("opened_orders ", opened_orders);	
+               Print("magic_numbers_trades[magic] ", magic_numbers_trades[magic]);	
                Print("magic_numbers_trailing[magic] ", magic_numbers_trailing[magic]);
                
-               if(opened_orders==1 && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0){
+               if(trailing_stop && opened_orders==1 && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0){
                   Print("Checking for trailing stop");
                   int res = setTrailingStop(magic, first_order_type, first_order_price);
                }
@@ -346,6 +343,8 @@ void stopTradingUntilTomorrow() {
    datetime today_midnight = TimeCurrent()-(TimeCurrent()%(PERIOD_D1*60));
    stop_trading_until = today_midnight+PERIOD_D1*60; // tomorrow midnight
    Print("Trading stopped until tomorrow!");
+   
+   return;
 }
 
 int setTrailingStop(int magic, int first_order_type, double first_order_price) {
@@ -360,28 +359,29 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
    symbol_info.Name(_Symbol);
    
    
-   for (int i = PositionsTotal() - 1; i >= 0; i--) {
-      if(pos_info.SelectByIndex(i) == false) {
+   for (int i = OrdersTotal() - 1; i >= 0; i--) {
+      if(pos_info.SelectByIndex(i) == false ) {
          Print("ERROR - Unable to select the order - ",GetLastError());
          break;
       } 
       
-      if(PositionGetInteger(POSITION_MAGIC) == magic) {
+      
+      if(PositionGetInteger(POSITION_MAGIC) == magic_numbers[magic]) {
 
          // Getting profit in pips
          double profitPips = pos_info.Profit() - pos_info.Swap() - pos_info.Commission(); // To be checked
-         Print("Profit pips: ", profitPips, " openprice: ", PositionGetDouble(POSITION_PRICE_OPEN), " orderprofit: ", pos_info.Profit());
+         Print("Profit pips: ", profitPips, " openprice: ", PositionGetInteger(POSITION_MAGIC), " orderprofit: ", pos_info.Profit());
          
          switch(first_order_type) {
             case POSITION_TYPE_BUY:
                // First trailing stop
-               if(magic_numbers_trailing[magic]==0 && profitPips > tp_pips/4) {
+               if(magic_numbers_trailing[magic] == 0 && profitPips > tp_pips/4) {
                   new_stop_loss = PositionGetDouble(POSITION_PRICE_OPEN) + (reco_pips/10)*symbol_info.Point()*10;
                }
                
                break;
             case POSITION_TYPE_SELL:
-               if(magic_numbers_trailing[magic]==0 && profitPips > tp_pips/4) {
+               if(magic_numbers_trailing[magic] ==0 && profitPips > tp_pips/4) {
                   new_stop_loss = PositionGetDouble(POSITION_PRICE_OPEN) - (reco_pips/10)*symbol_info.Point()*10;
                }
                break;
@@ -394,7 +394,6 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
                PrintFormat("OrderSend error %d",GetLastError());  // if unable to send the request, output the error code
             }
             Print("Set trailing stop to new sl: ", new_stop_loss);
-            
             magic_numbers_trailing[magic]++;
          }
       }
@@ -426,23 +425,23 @@ int setConservativeStopLoss(int magic, int first_order_type, double first_order_
    CPositionInfo pos_info;
    
    for (int i = PositionsTotal() - 1; i >= 0; i--) {
-      if( pos_info.SelectByIndex(i) == false ) {
-         Print("ERROR - Unable to select the order - ", GetLastError());
+      if(pos_info.SelectByIndex(i) == false ) {
+         Print("ERROR - Unable to select the order - ",GetLastError());
          break;
       }
       
-      if(PositionGetInteger(POSITION_MAGIC) == magic) {
-         request.action  =TRADE_ACTION_SLTP; // type of trade operation
-         request.position = PositionGetTicket(i);   // ticket of the position
-         request.symbol = PositionGetString(POSITION_SYMBOL);
+      if(pos_info.Magic() == magic) {
+         request.action  = TRADE_ACTION_SLTP; // type of trade operation
+         request.position = pos_info.Ticket();   // ticket of the position
+         request.symbol = pos_info.Symbol();
          request.sl = new_stop_loss;                // Stop Loss of the position
-         request.tp = PositionGetDouble(POSITION_TP);
+         request.tp = pos_info.TakeProfit();
          
          if(!OrderSend(request,result)) {
             PrintFormat("OrderSend error %d",GetLastError());  // if unable to send the request, output the error code
+         } else{
+            magic_numbers_trailing[magic] = 1;
          }
-         //int res = OrderModify(pos_info.Ticket(),OrderGetDouble(ORDER_PRICE_OPEN), new_stop_loss, pos_info.TakeProfit(), pos_info., 0);
-         
       }
    }
    
@@ -451,19 +450,20 @@ int setConservativeStopLoss(int magic, int first_order_type, double first_order_
 int cancelAllOrders(int magic) {
    MqlTradeRequest request;
    MqlTradeResult  result;
-  
+   
    request.action = TRADE_ACTION_REMOVE;
    
    COrderInfo ord_info;
    
    for(int i=OrdersTotal()-1; i>=0; i--){
-      if(ord_info.SelectByIndex(i) && OrderGetInteger(ORDER_MAGIC) == magic) {
+      if(ord_info.SelectByIndex(i) && ord_info.Magic() == magic) {
             //int res = OrderDelete(OrderTicket());
-            request.order  = OrderGetTicket(i);
+            request.order  = ord_info.Ticket();
             ResetLastError();
-            
             if(!OrderSend(request,result)){
                Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+            } else{
+               Print("Orders deleted");
             }
        }
    }
@@ -480,16 +480,19 @@ int cancelOrderIfNotFirst(int magic) {
    COrderInfo ord_info;
    
    for(int i=OrdersTotal()-1;i>=0;i--){
-      if(ord_info.SelectByIndex(i) && (OrderGetInteger(ORDER_MAGIC) == magic)) {
-         if(OrderGetString(ORDER_COMMENT)!="1") {      
+      if(ord_info.Select(i) && ord_info.Magic() == magic) {
+         if(ord_info.Comment() != "1") {      
             request.order  = OrderGetTicket(i);
             ResetLastError();
             if(!OrderSend(request,result)){
                Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+            } else{
+               Print("Order deleted");
             }
          }
       }
    }
+   
    return 0;
 }
 
