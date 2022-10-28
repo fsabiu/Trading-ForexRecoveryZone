@@ -469,6 +469,8 @@ int cancelOrderIfNotFirst(int magic) {
       }
    }
    
+   setFreeMagicNumber(magic);
+   
    return 0;
 }
 
@@ -493,6 +495,7 @@ int cancelAllOrders(int magic) {
        }
    }
    
+   setFreeMagicNumber(magic);
    return 0;
 }
 
