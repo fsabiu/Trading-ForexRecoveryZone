@@ -108,7 +108,7 @@ void OnTick()
       
       // Trade every "period" minutes
       if(int(TimeToString(TimeCurrent(),TIME_MINUTES)) % 5 == 0) {
-         Print("5 minutes");
+         //Print("5 minutes");
          // Enough margin to open a trade?
          int free_trades = getFreeTrades();
          if(free_trades>0 && isTradingSession() && TimeCurrent() >= stop_trading_until) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
@@ -199,6 +199,7 @@ void checkOrders() {
          first_order_type = -1;
          first_order_price = -1;
          first_order_symbol = "";
+         bool first_position_found = false;
          
          // Counting orders
          COrderInfo ord_info;	
@@ -206,15 +207,19 @@ void checkOrders() {
          
          for (int i = 0; i < OrdersTotal(); i++) {
             if(ord_info.SelectByIndex(i) == false ) {
-               //Print("ERROR - Unable to select the order - ",GetLastError());
+               Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             } 
+            if(ord_info.Comment() == "1"){
+                  first_position_found = true;
+               }
+               
             if(ord_info.Magic() == magic){
                pending_orders++;
             }
          }
          
-         Print("Position with magic nr: ", magic);
+         //Print("Position with magic nr: ", magic);
          // Counting positions (opened orders)
          for (int i = 0; i < PositionsTotal(); i++) {
             CPositionInfo pos_info;
@@ -224,19 +229,24 @@ void checkOrders() {
             }
             if(pos_info.Magic() == magic) {
                opened_orders++;
-               Print("One position with magic ", magic);
+               //Print("One position with magic ", magic);
                
                CSymbolInfo symbol_info;
                symbol_info.Name(_Symbol);
-               double pips = MathAbs((pos_info.PriceCurrent() - pos_info.PriceOpen()))/symbol_info.Point();
-               Print("Pips: ", pips);
+               double pips = 0.0;
+               pips = (pos_info.PriceCurrent() - pos_info.PriceOpen())/symbol_info.Point();
+               if(pips < 0) pips = pips*(-1);
                
-               if(pips >= tp_pips + reco_pips) {
+               if(pips >= tp_pips + reco_pips + 1) {
                   Print("Invalid invariant");
                }
          
-               
                datetime pos_time = pos_info.Time();
+               
+               //Print("Magic: ", magic, " Comment: ", pos_info.Comment());
+               if(pos_info.Comment() == "1"){
+                  first_position_found = true;
+               }
                
                if(first_order_type == -1 || pos_time < first_order_time){ // if 1st position or older
                   first_order_type = pos_info.Type();
@@ -246,10 +256,6 @@ void checkOrders() {
                }
             }
          }
-         
-         Print("Current: ", pos_info.PriceCurrent());
-         Print("Open: ", pos_info.PriceOpen());
-         Print("Difference: ", MathAbs(pos_info.PriceOpen() - pos_info.PriceCurrent()));
          
          total_orders = opened_orders + pending_orders;
          
@@ -272,7 +278,7 @@ void checkOrders() {
                
                // TP hit before last pending order triggering
                if(opened_orders==1 && pending_orders == 1){
-                  Print("OK");
+                  //Print("OK");
                }
                
                // TP hit before last pending order triggering
@@ -286,14 +292,20 @@ void checkOrders() {
                   cancelAllOrders(magic);
                }
                
+               
+               if(!first_position_found == opened_orders==1) {
+                  cancelAllOrders(magic);
+                  closeAllPositions(magic);
+               }
+               
                // Next order: standard case 
                if(pending_orders == 0 && magic_numbers_trailing[magic]==0 && opened_orders >=1 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
-                  Print("Opened: ", opened_orders, ", pending: ", pending_orders, ", total: ", total_orders);
+                  //Print("Opened: ", opened_orders, ", pending: ", pending_orders, ", total: ", total_orders);
                   
-                  Print("Next order coming...");
-                  Print(first_order_symbol);
-                  Print(first_order_type);
-                  Print(first_order_price);
+                  //Print("Next order coming...");
+                  //Print(first_order_symbol);
+                  //Print(first_order_type);
+                  //Print(first_order_price);
                   int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
                }
                
@@ -304,7 +316,7 @@ void checkOrders() {
                
                // Trailing stop
                if(trailing_stop && opened_orders==1 && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0){
-                  Print("Checking for trailing stop");
+                  //Print("Checking for trailing stop");
                   int res = setTrailingStop(magic, first_order_type, first_order_price);
                }
                break;
@@ -327,7 +339,7 @@ void setTradesSizes(){
       //trades_sizes[i] = RoundToDigitsUp((size_multipler*trades_sizes[i]), 2);
    }
 
-   Print("Using sizes:");
+   //Print("Using sizes:");
    for(int i=0; i<ArraySize(trades_sizes); i++) {
       Print(trades_sizes[i]);
    }
@@ -353,20 +365,22 @@ int getFreeTrades(){
    int free_trades = 0;
    
    // Worst case for the currently opened trades
-   double current_trades = trade_size_required*magic_numbers_cont;
    
    // TODO consider trades with trail stop or SL at breakeven
    double size_required = trade_size_required*eurperlot; // size required by a trade with current size
 
    double potential_busy_margin = 0;
    
-   for(int i=0; i<ArraySize(magic_numbers_trailing); i++){
-      if(magic_numbers_trailing[i] == 0){
-         potential_busy_margin += trade_size_required;
-      } else{ // If breakeven or trailing stop
-         potential_busy_margin = trades_sizes[0];
+   for(int i=0; i<ArraySize(magic_numbers); i++){
+      
+      if(magic_numbers[i] != -1 && magic_numbers_trailing[i] == 0){
+         potential_busy_margin += size_required;
+      }
+      if(magic_numbers[i] != -1 && magic_numbers_trailing[i] > 0){ // If breakeven or trailing stop
+         potential_busy_margin += trades_sizes[0];
       }
    }
+   
    // Margin level = (Equity/Used Margin) X 100
    // Margin level if another position is opened (+size_required)
    double potential_margin_level = 101;
@@ -446,7 +460,8 @@ void setFreeMagicNumber(int n){
 /*	
 Orders and positions management functions:	
  - cancelOrderIfNotFirst()	
- - cancelAllOrders()	
+ - cancelAllOrders()
+ - closeAllPositions()
 */
 
 int cancelOrderIfNotFirst(int magic) {
@@ -463,7 +478,7 @@ int cancelOrderIfNotFirst(int magic) {
             request.order  = ord_info.Ticket();
             ResetLastError();
             if(!OrderSend(request,result)){
-               //Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
             } else{
                setFreeMagicNumber(magic);
             }
@@ -491,9 +506,24 @@ int cancelAllOrders(int magic) {
                Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
             } else{
                setFreeMagicNumber(magic);
-               Print("Orders deleted");
+               //Print("Orders deleted");
             }
        }
+   }
+   
+   return 0;
+}
+
+int closeAllPositions(int magic) {
+   
+   CPositionInfo pos_info;
+   
+   for(int i = PositionsTotal()-1; i >= 0; i--){
+      if(pos_info.SelectByIndex(i) && pos_info.Magic() == magic) {
+            //int res = OrderDelete(OrderTicket());
+            trade.PositionClose(pos_info.Ticket());
+            setFreeMagicNumber(magic);
+      }
    }
    
    return 0;
@@ -570,21 +600,21 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
                if(profit_pips > trigger_point) {
                   double step = (tp_pips/10.0);
                   new_stop_loss = pos_info.PriceOpen(); // + step*symbol_info.Point();
-                  Print("Comparison true. New stop loss set to: ", new_stop_loss);
+                  //Print("Comparison true. New stop loss set to: ", new_stop_loss);
                }
                break;
             case POSITION_TYPE_SELL:
                if(profit_pips > trigger_point) {
                   double step = (tp_pips/10.0);
                   new_stop_loss = pos_info.PriceOpen(); // - step*symbol_info.Point();
-                  Print("Comparison true. New stop loss set to: ", new_stop_loss);
+                  //Print("Comparison true. New stop loss set to: ", new_stop_loss);
                }
                break;
          }
    
          // setting stop loss
          if(new_stop_loss!=0.0) {
-            Print("Putting trailing stop");
+            //Print("Putting trailing stop");
             request.action  = TRADE_ACTION_SLTP; // type of trade operation
             request.type_filling = ORDER_FILLING_FOK;///
             request.position = pos_info.Ticket();   // ticket of the position
@@ -595,7 +625,7 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
             if(!OrderSend(request,result)) {
                PrintFormat("OrderSend error %d",GetLastError());  // if unable to send the request, output the error code
             } else {
-               Print("Set trailing stop to new sl: ", new_stop_loss);
+               //Print("Set trailing stop to new sl: ", new_stop_loss);
                magic_numbers_trailing[magic]++;
             }
             
@@ -706,14 +736,14 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    MqlTradeRequest request = {};
    MqlTradeResult  result={};
    
-   Print("sendNextOrder(): SETTING ", opened_orders+1, "ORDER...");
+   //Print("sendNextOrder(): SETTING ", opened_orders+1, "ORDER...");
    
-   Print("First order type: ", first_order_type);
-   Print("First order price: ", first_order_price);
+   //Print("First order type: ", first_order_type);
+   //Print("First order price: ", first_order_price);
    
-   Print("Next order price: ", new_order_price);
-   Print("First order tp: ", new_order_tp);
-   Print("First order sl: ", new_order_sl);
+   //Print("Next order price: ", new_order_price);
+   //Print("New order tp: ", new_order_tp);
+   //Print("New order sl: ", new_order_sl);
    
    
    request.type   = (ENUM_ORDER_TYPE)new_order_type;
@@ -732,18 +762,18 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    int err = OrderSend(request,result);
    if(!err){
       Print("Fail to set next order ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
-         Print("Type: ", request.type);
-         Print("Type filling: ", request.type_filling);
-         Print("Action: ", request.action);
-         Print("Magic: ", request.magic);
-         Print("Symbol: ", request.symbol);
-         Print("Volume: ", request.volume);
-         Print("Stop loss: ", request.sl);
-         Print("Take profit: ", request.tp);
-         Print("Request price: ", request.price);
-         Print("Comment: ", request.comment);
+         //Print("Type: ", request.type);
+         //Print("Type filling: ", request.type_filling);
+         //Print("Action: ", request.action);
+         //Print("Magic: ", request.magic);
+         //Print("Symbol: ", request.symbol);
+         //Print("Volume: ", request.volume);
+         //Print("Stop loss: ", request.sl);
+         //Print("Take profit: ", request.tp);
+         //Print("Request price: ", request.price);
+         //Print("Comment: ", request.comment);
    } else{
-         Print("Next request sent.");
+         //Print("Next request sent.");
          tradesnr++;
          magic_numbers_trades[magic_number] = magic_numbers_trades[magic_number] + 1;
          //Print("sendNextOrder(): #", tradesnr, " Order placed at ", new_order_price, " sl: ", new_order_sl, " tp: ", new_order_tp, " size: ", new_order_size);
