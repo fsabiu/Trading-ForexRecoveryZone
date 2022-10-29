@@ -76,26 +76,19 @@ int OnInit()
    // Getting equity
    account_equity = AccountInfoDouble(ACCOUNT_EQUITY);
    account_equity_prev = AccountInfoDouble(ACCOUNT_EQUITY);
-   //Print("Account equity: ", account_equity);
    
    // Getting free margin
    account_free_margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   //Print("Account free margin: ", account_free_margin);
    
    // Set sizes of trading (depends on multiplier)
    setTradesSizes();
    
    // Calculate size needed for a trade (worst scenario: max_trade_orders)
    trade_size_required = getRequiredSize();
-   //Print("Size required by a trade: ", trade_size_required);
    
    // Allocate magic_numbers array and initializing elements to -1 
-   //Print("Trade size required ", trade_size_required);
-   //Print("Eurperlot ", eurperlot);
-   //Print("trade_size_required*eurperlot ", trade_size_required*eurperlot);
    
    int sz = MathRound((account_equity)/(trade_size_required*eurperlot))*2.0;
-   //Print("Size::::", sz);
    initMagicNumbers(sz, 0);
    
    // Initializing stop trading
@@ -114,14 +107,10 @@ void OnTick()
       checkOrders();
       
       // Trade every "period" minutes
-      if(int(TimeToString(TimeCurrent(),TIME_MINUTES)) % period == 0) {
-         //Print("5 mins");
-         //Print(TimeCurrent());
+      if(int(TimeToString(TimeCurrent(),TIME_MINUTES)) % 5 == 0) {
+         Print("5 minutes");
          // Enough margin to open a trade?
          int free_trades = getFreeTrades();
-         Print("OnTick(): Free trades: ", free_trades);
-         Print("Magic cont: ", magic_numbers_cont);
-         //Print("Free trades: ", free_trades, " Is trading session: ", isTradingSession(), " stop_trading_until: ", stop_trading_until);
          if(free_trades>0 && isTradingSession() && TimeCurrent() >= stop_trading_until) { //How many 1st operations can I open? Also will depend on maximal drawdown allowed
             // Look for 1st operation
             int scan = marketScan();
@@ -152,11 +141,11 @@ int marketScan() {
          if(!trade.Buy(trades_sizes[0], 
             _Symbol, 
             symbol_info.Ask(), 
-            symbol_info.Bid() - (tp_pips+reco_pips)*symbol_info.Point()*10,
-            symbol_info.Bid() + tp_pips*symbol_info.Point()*10,
+            symbol_info.Bid() - (tp_pips+reco_pips)*symbol_info.Point(),
+            symbol_info.Bid() + tp_pips*symbol_info.Point(),
             "1")) {
             //--- failure message
-            //Print("Buy() method failed. Return code=",trade.ResultRetcode(), ". Code description: ",trade.ResultRetcodeDescription());
+            Print("Buy() method failed. Return code=",trade.ResultRetcode(), ". Code description: ",trade.ResultRetcodeDescription());
          } else {
             //Print("Buy() method executed successfully. Return code=",trade.ResultRetcode()," (",trade.ResultRetcodeDescription(),")");
             tradesnr++;	
@@ -169,11 +158,11 @@ int marketScan() {
          if(!trade.Sell(trades_sizes[0], 
             _Symbol, 
             symbol_info.Bid(), 
-            symbol_info.Ask() + (tp_pips+reco_pips)*symbol_info.Point()*10,
-            symbol_info.Ask() - tp_pips*symbol_info.Point()*10,
+            symbol_info.Ask() + (tp_pips+reco_pips)*symbol_info.Point(),
+            symbol_info.Ask() - tp_pips*symbol_info.Point(),
             "1")) {
             //--- failure message
-            //Print("Buy() method failed. Return code=",trade.ResultRetcode(), ". Code description: ",trade.ResultRetcodeDescription());
+            Print("Buy() method failed. Return code=",trade.ResultRetcode(), ". Code description: ",trade.ResultRetcodeDescription());
          } else {
             //Print("Sell() method executed successfully. Return code=",trade.ResultRetcode()," (",trade.ResultRetcodeDescription(),")");
             tradesnr++;
@@ -220,11 +209,12 @@ void checkOrders() {
                //Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             } 
-            if(ord_info.Magic() == magic_numbers[magic]){
+            if(ord_info.Magic() == magic){
                pending_orders++;
             }
          }
          
+         Print("Position with magic nr: ", magic);
          // Counting positions (opened orders)
          for (int i = 0; i < PositionsTotal(); i++) {
             CPositionInfo pos_info;
@@ -232,31 +222,41 @@ void checkOrders() {
                //Print("ERROR - Unable to select the order - ",GetLastError());
                break;
             }
-            if(pos_info.Magic() == magic_numbers[magic]){
+            if(pos_info.Magic() == magic) {
                opened_orders++;
+               Print("One position with magic ", magic);
                
-               datetime pos_time = PositionGetInteger(POSITION_TIME);
+               CSymbolInfo symbol_info;
+               symbol_info.Name(_Symbol);
+               double pips = MathAbs((pos_info.PriceCurrent() - pos_info.PriceOpen()))/symbol_info.Point();
+               Print("Pips: ", pips);
                
-               if(pos_time < first_order_time){
-                  first_order_type = PositionGetInteger(POSITION_TYPE);
-                  first_order_time = PositionGetInteger(POSITION_TIME);
-                  first_order_price = PositionGetDouble(POSITION_PRICE_OPEN);
-                  first_order_symbol = PositionGetString(POSITION_SYMBOL);
+               if(pips >= tp_pips + reco_pips) {
+                  Print("Invalid invariant");
+               }
+         
+               
+               datetime pos_time = pos_info.Time();
+               
+               if(first_order_type == -1 || pos_time < first_order_time){ // if 1st position or older
+                  first_order_type = pos_info.Type();
+                  first_order_time = pos_info.Time();
+                  first_order_price = pos_info.PriceOpen();
+                  first_order_symbol = pos_info.Symbol();
                }
             }
          }
-
+         
+         Print("Current: ", pos_info.PriceCurrent());
+         Print("Open: ", pos_info.PriceOpen());
+         Print("Difference: ", MathAbs(pos_info.PriceOpen() - pos_info.PriceCurrent()));
          
          total_orders = opened_orders + pending_orders;
-         //Print("CheckOrders(): Total orders: ", total_orders);
-         //Print("CheckOrders(): Open orders: ", opened_orders);
-         //Print("CheckOrders():Pending orders: ", pending_orders);
          
          switch(total_orders)
             {
             case 0:
                // Remove Magic Number, TP or SL hit
-               //Print("Placed order CLOSED!");
                setFreeMagicNumber(magic);
                // If enabled: if loss, stop trading for today
                if(stop_if_loss == true && account_equity_prev > account_equity) {
@@ -267,15 +267,18 @@ void checkOrders() {
             default: // total_orders >= 1
                // Checks
                if(pending_orders > 1){
-                  //Print("CheckOrders(): Too many pending orders!"); // We should not have more pending orders for a magic number
+                  Print("CheckOrders(): Too many pending orders!"); // We should not have more pending orders for a magic number
+               }
+               
+               // TP hit before last pending order triggering
+               if(opened_orders==1 && pending_orders == 1){
+                  Print("OK");
                }
                
                // TP hit before last pending order triggering
                if(opened_orders==0 && pending_orders == 1){
                   // If it's not the 1st, cancel it
                   cancelOrderIfNotFirst(magic);
-                  
-                  //Print("CheckOrders(): Closed");
                }
                
                // Partial closing of orders
@@ -284,12 +287,14 @@ void checkOrders() {
                }
                
                // Next order: standard case 
-               if(pending_orders == 0 && opened_orders >=1 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0) {
-                  //Print("SENDING ORDER WITH LOTS ", trades_sizes[opened_orders]);
-                  //Print("CheckOrders(): First order type: ", first_order_type);
-                  //Print("CheckOrders(): Open orders: ", opened_orders, ", pending orders: ", pending_orders);
+               if(pending_orders == 0 && magic_numbers_trailing[magic]==0 && opened_orders >=1 && opened_orders < max_trade_orders && magic_numbers_trades[magic] == opened_orders) {
+                  Print("Opened: ", opened_orders, ", pending: ", pending_orders, ", total: ", total_orders);
+                  
+                  Print("Next order coming...");
+                  Print(first_order_symbol);
+                  Print(first_order_type);
+                  Print(first_order_price);
                   int err = sendNextOrder(first_order_symbol, first_order_type, first_order_price, opened_orders, magic);
-                  //Print("CheckOrders(): Order nr ", opened_orders+1);
                }
                
                // Conservative stop (just after last position opening)
@@ -298,11 +303,6 @@ void checkOrders() {
                }
                
                // Trailing stop
-               //Print("Trailing checks");	
-               //Print("opened_orders ", opened_orders);	
-               //Print("magic_numbers_trades[magic] ", magic_numbers_trades[magic]);	
-               //Print("magic_numbers_trailing[magic] ", magic_numbers_trailing[magic]);
-               
                if(trailing_stop && opened_orders==1 && magic_numbers_trades[magic] == opened_orders && magic_numbers_trailing[magic]==0){
                   Print("Checking for trailing stop");
                   int res = setTrailingStop(magic, first_order_type, first_order_price);
@@ -327,9 +327,9 @@ void setTradesSizes(){
       //trades_sizes[i] = RoundToDigitsUp((size_multipler*trades_sizes[i]), 2);
    }
 
-   //Print("Using sizes:");
+   Print("Using sizes:");
    for(int i=0; i<ArraySize(trades_sizes); i++) {
-      //Print(trades_sizes[i]);
+      Print(trades_sizes[i]);
    }
    return;
 }
@@ -357,14 +357,16 @@ int getFreeTrades(){
    
    // TODO consider trades with trail stop or SL at breakeven
    double size_required = trade_size_required*eurperlot; // size required by a trade with current size
-   double potential_busy_margin = size_required*current_trades;
+
+   double potential_busy_margin = 0;
    
-   /*
-   //Print("Size required: ", size_required);
-   //Print("Trade size required: ", trade_size_required);
-   //Print("Eur per lot: ", eurperlot);
-   */
-   
+   for(int i=0; i<ArraySize(magic_numbers_trailing); i++){
+      if(magic_numbers_trailing[i] == 0){
+         potential_busy_margin += trade_size_required;
+      } else{ // If breakeven or trailing stop
+         potential_busy_margin = trades_sizes[0];
+      }
+   }
    // Margin level = (Equity/Used Margin) X 100
    // Margin level if another position is opened (+size_required)
    double potential_margin_level = 101;
@@ -463,14 +465,12 @@ int cancelOrderIfNotFirst(int magic) {
             if(!OrderSend(request,result)){
                //Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
             } else{
-               //Print("Order deleted");
+               setFreeMagicNumber(magic);
             }
          }
       }
    }
-   
-   setFreeMagicNumber(magic);
-   
+
    return 0;
 }
 
@@ -490,12 +490,12 @@ int cancelAllOrders(int magic) {
             if(!OrderSend(request,result)){
                Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
             } else{
+               setFreeMagicNumber(magic);
                Print("Orders deleted");
             }
        }
    }
    
-   setFreeMagicNumber(magic);
    return 0;
 }
 
@@ -569,14 +569,14 @@ int setTrailingStop(int magic, int first_order_type, double first_order_price) {
                // First trailing stop
                if(profit_pips > trigger_point) {
                   double step = (tp_pips/10.0);
-                  new_stop_loss = pos_info.PriceOpen(); // + step*symbol_info.Point()*10;
+                  new_stop_loss = pos_info.PriceOpen(); // + step*symbol_info.Point();
                   Print("Comparison true. New stop loss set to: ", new_stop_loss);
                }
                break;
             case POSITION_TYPE_SELL:
                if(profit_pips > trigger_point) {
                   double step = (tp_pips/10.0);
-                  new_stop_loss = pos_info.PriceOpen(); // - step*symbol_info.Point()*10;
+                  new_stop_loss = pos_info.PriceOpen(); // - step*symbol_info.Point();
                   Print("Comparison true. New stop loss set to: ", new_stop_loss);
                }
                break;
@@ -619,10 +619,10 @@ int setConservativeStopLoss(int magic, int first_order_type, double first_order_
    
    switch(first_order_type) {
       case POSITION_TYPE_BUY:
-         new_stop_loss = first_order_price - (reco_pips/2)*symbol_info.Point()*10;
+         new_stop_loss = first_order_price - (reco_pips/2)*symbol_info.Point();
          break;
       case POSITION_TYPE_SELL:
-         new_stop_loss = first_order_price + (reco_pips/2)*symbol_info.Point()*10;
+         new_stop_loss = first_order_price + (reco_pips/2)*symbol_info.Point();
          break;
    }
    
@@ -665,25 +665,25 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    CSymbolInfo symbol_info;
    symbol_info.Name(_Symbol);
    
-   //Print("First order type: ", first_order_type);
+
    switch(first_order_type)
       {
       case POSITION_TYPE_BUY:
             if(opened_orders % 2 == 0) { // Buy
                new_order_type = ORDER_TYPE_BUY_STOP;
                new_order_price = first_order_price;
-               new_order_tp = first_order_price + tp_pips*symbol_info.Point()*10;
-               new_order_sl = first_order_price - (tp_pips + reco_pips)*symbol_info.Point()*10;
+               new_order_tp = first_order_price + tp_pips*symbol_info.Point();
+               new_order_sl = first_order_price - (tp_pips + reco_pips)*symbol_info.Point();
                if(conservative_stop==true){
-                  new_order_sl = first_order_price - (reco_pips/2)*symbol_info.Point()*10;
+                  new_order_sl = first_order_price - (reco_pips/2)*symbol_info.Point();
                }
             }else { // Sell
                new_order_type = ORDER_TYPE_SELL_STOP;
-               new_order_price = first_order_price - reco_pips*symbol_info.Point()*10;
-               new_order_tp = first_order_price - (tp_pips + reco_pips)*symbol_info.Point()*10;
-               new_order_sl = first_order_price + tp_pips*symbol_info.Point()*10;
+               new_order_price = first_order_price - reco_pips*symbol_info.Point();
+               new_order_tp = first_order_price - (tp_pips + reco_pips)*symbol_info.Point();
+               new_order_sl = first_order_price + tp_pips*symbol_info.Point();
                if(conservative_stop==true){
-                  new_order_sl = first_order_price - (reco_pips/2)*symbol_info.Point()*10;
+                  new_order_sl = first_order_price - (reco_pips/2)*symbol_info.Point();
                }
             }
             break;
@@ -691,13 +691,13 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
             if(opened_orders % 2 == 0) { // Sell
                new_order_type = ORDER_TYPE_SELL_STOP;
                new_order_price = first_order_price;
-               new_order_tp = first_order_price - tp_pips*symbol_info.Point()*10;
-               new_order_sl = first_order_price + (tp_pips + reco_pips)*symbol_info.Point()*10;
+               new_order_tp = first_order_price - tp_pips*symbol_info.Point();
+               new_order_sl = first_order_price + (tp_pips + reco_pips)*symbol_info.Point();
             } else{
                new_order_type = ORDER_TYPE_BUY_STOP;
-               new_order_price = first_order_price + reco_pips*symbol_info.Point()*10;
-               new_order_tp = first_order_price + (tp_pips + reco_pips)*symbol_info.Point()*10;
-               new_order_sl = first_order_price - tp_pips*symbol_info.Point()*10;
+               new_order_price = first_order_price + reco_pips*symbol_info.Point();
+               new_order_tp = first_order_price + (tp_pips + reco_pips)*symbol_info.Point();
+               new_order_sl = first_order_price - tp_pips*symbol_info.Point();
             }
             break;
       }
@@ -705,6 +705,16 @@ int sendNextOrder(string symbol, int first_order_type, double first_order_price,
    // Send Order
    MqlTradeRequest request = {};
    MqlTradeResult  result={};
+   
+   Print("sendNextOrder(): SETTING ", opened_orders+1, "ORDER...");
+   
+   Print("First order type: ", first_order_type);
+   Print("First order price: ", first_order_price);
+   
+   Print("Next order price: ", new_order_price);
+   Print("First order tp: ", new_order_tp);
+   Print("First order sl: ", new_order_sl);
+   
    
    request.type   = (ENUM_ORDER_TYPE)new_order_type;
    request.type_filling = ORDER_FILLING_FOK;///
