@@ -1,5 +1,5 @@
 # Trading-ForexRecoveryZone
-Forex trading algorithm for MetaTrader 4 implementing a hedging strategy
+Forex trading algorithm for MetaTrader 5 implementing a hedging strategy
 
 The goal of this project is to implement a hedging strategy with predictable losses at worst case scenarios.
 
